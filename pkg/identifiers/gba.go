@@ -727,6 +727,243 @@ func (n *N64Identifier) Identify(path string) (map[string]string, error) {
 	return nil, fmt.Errorf("N64 game not found (%c%c %c): %s", cartridgeID[0], cartridgeID[1], countryCode, path)
 }
 
+// SNESIdentifier implements game identification for Super Nintendo
+type SNESIdentifier struct {
+	db *database.GameDatabase
+}
+
+// NewSNESIdentifier creates a new SNES identifier
+func NewSNESIdentifier(db *database.GameDatabase) *SNESIdentifier {
+	return &SNESIdentifier{db: db}
+}
+
+// Console returns the console name
+func (s *SNESIdentifier) Console() string {
+	return "SNES"
+}
+
+// Identify identifies a SNES game and returns its metadata
+func (s *SNESIdentifier) Identify(path string) (map[string]string, error) {
+	// Check file exists
+	if err := fileio.CheckExists(path); err != nil {
+		return nil, err
+	}
+
+	// Open file
+	file, err := fileio.OpenFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open SNES file: %w", err)
+	}
+	defer file.Close()
+
+	// Read entire ROM
+	data, err := fileio.ReadAll(file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read SNES file: %w", err)
+	}
+
+	// Remove optional 512-byte copier header if present
+	if (len(data) % 1024) == 512 {
+		data = data[512:]
+	}
+
+	// Try to find header (LoROM at 0x7FC0 or HiROM at 0xFFC0)
+	var headerStart int
+	var romType string
+
+	// Check if we have enough data for headers
+	if len(data) < 0x8000 {
+		return nil, fmt.Errorf("invalid SNES ROM: file too small (got %d bytes after header removal)", len(data))
+	}
+
+	// Try to detect header location by validating checksum
+	checksumValid := false
+	for _, offset := range []int{0x7FC0, 0xFFC0} {
+		if offset+32 > len(data) {
+			continue
+		}
+
+		// Read checksum and complement
+		checksum := uint16(data[offset+0x1F])<<8 | uint16(data[offset+0x1E])
+		complement := uint16(data[offset+0x1D])<<8 | uint16(data[offset+0x1C])
+
+		// Valid if checksum + complement = 0xFFFF
+		if checksum+complement == 0xFFFF {
+			headerStart = offset
+			checksumValid = true
+			break
+		}
+	}
+
+	// If checksum validation failed, try to detect by other means
+	if !checksumValid {
+		// Default to LoROM if we have enough data
+		if len(data) >= 0x8000 {
+			headerStart = 0x7FC0
+		} else {
+			return nil, fmt.Errorf("invalid SNES ROM: file too small")
+		}
+	}
+
+	// Parse header
+	header := data[headerStart:]
+
+	// Internal title (21 bytes)
+	internalTitle := header[0:21]
+	internalTitleHex := "0x"
+	for _, b := range internalTitle {
+		internalTitleHex += fmt.Sprintf("%02x", b)
+	}
+
+	// For database lookup, trim trailing spaces from internal title
+	trimmedTitle := bytes.TrimRight(internalTitle, " \x00")
+	trimmedTitleHex := "0x"
+	for _, b := range trimmedTitle {
+		trimmedTitleHex += fmt.Sprintf("%02x", b)
+	}
+
+	// ROM makeup byte
+	romMakeup := header[0x15]
+	
+	// Fast/Slow ROM
+	fastSlowROM := "SlowROM"
+	if (romMakeup & 0x10) != 0 {
+		fastSlowROM = "FastROM"
+	}
+
+	// ROM type based on makeup byte
+	if (romMakeup & 0x01) == 0 {
+		romType = "LoROM"
+	} else {
+		romType = "HiROM"
+	}
+	if (romMakeup & 0x04) != 0 {
+		romType = "Ex" + romType
+	}
+
+	// Cartridge type (hardware)
+	cartridgeType := header[0x16]
+	hardware := getHardwareType(cartridgeType, data, headerStart)
+
+	// ROM size
+	// romSize := header[0x17]
+
+	// RAM size
+	// ramSize := header[0x18]
+
+	// Country code
+	// countryCode := header[0x19]
+
+	// Developer ID
+	developerID := header[0x1A]
+
+	// Version
+	romVersion := header[0x1B]
+
+	// Checksum complement
+	// checksumComplement := uint16(header[0x1D])<<8 | uint16(header[0x1C])
+
+	// Checksum
+	checksum := uint16(header[0x1F])<<8 | uint16(header[0x1E])
+
+	// Build result
+	result := map[string]string{
+		"internal_title": internalTitleHex,
+		"fast_slow_rom":  fastSlowROM,
+		"rom_type":       romType,
+		"developer_ID":   fmt.Sprintf("0x%02x", developerID),
+		"rom_version":    fmt.Sprintf("%d", romVersion),
+		"checksum":       fmt.Sprintf("0x%04x", checksum),
+		"hardware":       hardware,
+		"language":       "N/A",
+		"region":         "NTSC-U", // Default, could be determined from country code
+	}
+
+	// Generate gamedb ID using trimmed title for database lookup
+	gamedbID := fmt.Sprintf("%d,%s,%d,%d", developerID, trimmedTitleHex, romVersion, checksum)
+
+
+
+	// Look up in database
+	if s.db != nil {
+		if gameData, found := s.db.LookupGame("SNES", gamedbID); found {
+
+			// Merge database metadata
+			for key, value := range gameData {
+				if key != "internal_title" { // Keep our parsed internal title
+					result[key] = value
+				}
+			}
+		}
+	}
+
+	// If no title found in database, try to clean internal title
+	if result["title"] == "" {
+		// Convert internal title bytes to string, replacing non-printable with spaces
+		titleStr := ""
+		for _, b := range internalTitle {
+			if b >= 0x20 && b <= 0x7E {
+				titleStr += string(b)
+			} else {
+				titleStr += " "
+			}
+		}
+		result["title"] = strings.TrimSpace(titleStr)
+	}
+
+	return result, nil
+}
+
+// getHardwareType returns the hardware type string based on cartridge type byte
+func getHardwareType(cartridgeType byte, data []byte, headerStart int) string {
+	if cartridgeType <= 2 {
+		return []string{"ROM", "ROM + RAM", "ROM + RAM + Battery"}[cartridgeType]
+	}
+
+	// Check for coprocessor
+	hardware := ""
+	lastDigit := cartridgeType & 0x0F
+	if lastDigit >= 3 && lastDigit <= 6 {
+		hardware = []string{"ROM + Coprocessor", "ROM + Coprocessor + RAM", "ROM + Coprocessor + RAM + Battery", "ROM + Coprocessor + Battery"}[lastDigit-3]
+	}
+
+	// Determine coprocessor type
+	upperDigit := (cartridgeType >> 4) & 0x0F
+	// coprocessor := ""
+	
+	switch upperDigit {
+	case 0:
+		// coprocessor = "DSP"
+	case 1:
+		// coprocessor = "GSU / SuperFX"
+	case 2:
+		// coprocessor = "OBC1"
+	case 3:
+		// coprocessor = "SA-1"
+	case 4:
+		// coprocessor = "S-DD1"
+	case 5:
+		// coprocessor = "S-RTC"
+	case 0xE:
+		// coprocessor = "Super Game Boy / Satellaview"
+	case 0xF:
+		// Check $FFBF equivalent position
+		if headerStart >= 1 && headerStart-1 < len(data) {
+			ffbf := data[headerStart-1]
+			if (ffbf>>4) == 0 && (ffbf&0x0F) <= 3 {
+				// coprocessor = []string{"SPC7110", "ST010 / ST011", "ST018", "CX4"}[ffbf&0x0F]
+			}
+		}
+	}
+
+	if hardware == "" {
+		// Fallback for unknown hardware types
+		hardware = "ROM"
+	}
+
+	return hardware
+}
+
 // NewGBAIdentifier creates a new GBA identifier
 func NewGBAIdentifier(db *database.GameDatabase) *GBAIdentifier {
 	return &GBAIdentifier{db: db}

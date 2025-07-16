@@ -76,8 +76,8 @@ func TestSNESIdentify_Synthetic(t *testing.T) {
 	testDB := &database.GameDatabase{
 		Systems: map[string]database.SystemDatabase{
 			"SNES": {
-				"TEST_SNES_GAME": database.GameMetadata{
-					"internal_title": "0x54455354205346432047414d4520202020202020",
+				"1,0x54455354205346432047414d45,0,255": database.GameMetadata{
+					"internal_title": "0x54455354205346432047414d452020202020202020",
 					"title":          "Test SNES Game",
 					"developer":      "Test Developer",
 					"publisher":      "Test Publisher",
@@ -102,7 +102,7 @@ func TestSNESIdentify_Synthetic(t *testing.T) {
 	headerOffset := 0x7FC0
 
 	// Internal title at header+0x00 to header+0x14 (21 bytes)
-	copy(header[headerOffset:], []byte("TEST SFC GAME       "))
+	copy(header[headerOffset:], []byte("TEST SFC GAME        ")) // 21 bytes exactly
 
 	// ROM makeup at header+0x15
 	header[headerOffset+0x15] = 0x20 // LoROM, slow ROM
@@ -147,7 +147,7 @@ func TestSNESIdentify_Synthetic(t *testing.T) {
 
 	// Verify results
 	expected := map[string]string{
-		"internal_title": "0x54455354205346432047414d4520202020202020",
+		"internal_title": "0x54455354205346432047414d452020202020202020",
 		"fast_slow_rom":  "SlowROM",
 		"rom_type":       "LoROM",
 		"developer_ID":   "0x01",
@@ -196,7 +196,7 @@ func TestSNESIdentify_HiROM(t *testing.T) {
 	copy(header[headerOffset:], []byte("HIROM TEST GAME     "))
 
 	// ROM makeup - HiROM, fast ROM
-	header[headerOffset+0x15] = 0x21 // HiROM, fast ROM
+	header[headerOffset+0x15] = 0x31 // HiROM (bit 0x01), fast ROM (bit 0x10)
 
 	// Cartridge type
 	header[headerOffset+0x16] = 0x00 // ROM only
