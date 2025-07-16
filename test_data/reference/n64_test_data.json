@@ -1,0 +1,40 @@
+{
+  "N64": {
+    "AeroFighters Assault (USA).z64": {
+      "path": "/Volumes/MiSTer/games/N64/1 US - A-M/AeroFighters Assault (USA).z64",
+      "expected": {
+        "title": "AERO FIGHTERS ASSAUL",
+        "developer": "Paradigm Entertainment",
+        "publisher": "Video System",
+        "rating": "K-A / 3+",
+        "region": "NTSC-U",
+        "release_date": "1997-01-11",
+        "ID": "ERE"
+      }
+    },
+    "AeroGauge (USA).z64": {
+      "path": "/Volumes/MiSTer/games/N64/1 US - A-M/AeroGauge (USA).z64",
+      "expected": {
+        "title": "AEROGAUGE",
+        "developer": "Pacific Coast Power & Light",
+        "publisher": "ASCII Entertainment",
+        "rating": "E / 3+",
+        "region": "NTSC-U",
+        "release_date": "1998-01-04",
+        "ID": "AGE"
+      }
+    },
+    "Aidyn Chronicles - The First Mage (USA) (Rev 1).z64": {
+      "path": "/Volumes/MiSTer/games/N64/1 US - A-M/Aidyn Chronicles - The First Mage (USA) (Rev 1).z64",
+      "expected": {
+        "title": "AIDYN_CHRONICLES",
+        "developer": "H2O Interactive",
+        "publisher": "THQ",
+        "rating": "T / 11+",
+        "region": "NTSC-U",
+        "release_date": "2001-03-14",
+        "ID": "AYE"
+      }
+    }
+  }
+}

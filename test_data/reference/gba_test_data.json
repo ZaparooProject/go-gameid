@@ -1,0 +1,60 @@
+{
+  "GBA": {
+    "007 - Everything or Nothing (USA, Europe) (En,Fr,De).gba": {
+      "path": "/Volumes/MiSTer/games/GBA/1 USA - 0-9/007 - Everything or Nothing (USA, Europe) (En,Fr,De).gba",
+      "expected": {
+        "ID": "BJBE",
+        "internal_title": "BOND EON",
+        "maker_code": "69",
+        "main_unit_code": "0x00",
+        "device_type": "0x00",
+        "software_version": "0",
+        "title": "007: Everything or Nothing",
+        "language": "English / French / German",
+        "region": "NTSC-U"
+      }
+    },
+    "Golden Sun (USA, Europe).gba": {
+      "path": "/Volumes/MiSTer/games/GBA/1 USA - D-H/Golden Sun (USA, Europe).gba",
+      "expected": {
+        "ID": "AGSE",
+        "internal_title": "Golden_Sun_A",
+        "maker_code": "01",
+        "main_unit_code": "0x00",
+        "device_type": "0x00",
+        "software_version": "0",
+        "title": "Golden Sun",
+        "language": "N/A",
+        "region": "NTSC-U"
+      }
+    },
+    "Golden Sun - The Lost Age (USA, Europe).gba": {
+      "path": "/Volumes/MiSTer/games/GBA/1 USA - D-H/Golden Sun - The Lost Age (USA, Europe).gba",
+      "expected": {
+        "ID": "AGFE",
+        "internal_title": "GOLDEN_SUN_B",
+        "maker_code": "01",
+        "main_unit_code": "0x00",
+        "device_type": "0x00",
+        "software_version": "0",
+        "title": "Golden Sun: The Lost Age (Virtual Console)",
+        "language": "N/A",
+        "region": "NTSC-U"
+      }
+    },
+    "Classic NES Series - Super Mario Bros. (USA, Europe).gba": {
+      "path": "/Volumes/MiSTer/games/GBA/1 USA - A-C/Classic NES Series - Super Mario Bros. (USA, Europe).gba",
+      "expected": {
+        "ID": "FSME",
+        "internal_title": "SUPER MARIO",
+        "maker_code": "01",
+        "main_unit_code": "0x00",
+        "device_type": "0x00",
+        "software_version": "0",
+        "title": "Classic NES Series: Super Mario Bros.",
+        "language": "N/A",
+        "region": "NTSC-U"
+      }
+    }
+  }
+}
