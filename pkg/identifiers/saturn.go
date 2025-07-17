@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/wizzomafizzo/go-gameid/pkg/database"
-	"github.com/wizzomafizzo/go-gameid/pkg/fileio"
+	"github.com/wizzomafizzo/go-gameid/pkg/iso9660"
 )
 
 var (
@@ -63,33 +63,31 @@ func (s *SaturnIdentifier) Console() string {
 
 // Identify identifies a Saturn game and returns its metadata
 func (s *SaturnIdentifier) Identify(path string) (map[string]string, error) {
-	// Handle CUE files by using the first BIN
-	if strings.HasSuffix(strings.ToLower(path), ".cue") {
-		// For now, we'll just return an error since we need CUE parsing
-		return nil, fmt.Errorf("CUE file support not yet implemented for Saturn")
-	}
+	return s.IdentifyWithOptions(path, "", "", false)
+}
 
-	// Open file
-	reader, err := fileio.OpenFile(path)
+// IdentifyWithOptions identifies a Saturn game with additional parameters
+func (s *SaturnIdentifier) IdentifyWithOptions(path, discUUID, discLabel string, preferDB bool) (map[string]string, error) {
+	// Open disc image (ISO, CUE/BIN, or mounted directory)
+	disc, err := iso9660.OpenImage(path, discUUID, discLabel)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
+		return nil, fmt.Errorf("failed to open disc: %w", err)
 	}
-	defer reader.Close()
+	defer disc.Close()
 
-	// Read header (0x100 bytes should be enough to find magic word)
-	header := make([]byte, 0x100)
-	n, err := reader.Read(header)
+	// Read header (0x100 bytes should be enough to find magic word) from the disc image
+	initialHeaderBytes, err := disc.ReadFile(0, 0x100)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read header: %w", err)
 	}
-	if n < len(saturnMagicWord) {
+	if len(initialHeaderBytes) < len(saturnMagicWord) {
 		return nil, fmt.Errorf("file too small")
 	}
 
 	// Search for magic word
 	magicOffset := -1
-	for i := 0; i <= n-len(saturnMagicWord); i++ {
-		if bytes.Equal(header[i:i+len(saturnMagicWord)], saturnMagicWord) {
+	for i := 0; i <= len(initialHeaderBytes)-len(saturnMagicWord); i++ {
+		if bytes.Equal(initialHeaderBytes[i:i+len(saturnMagicWord)], saturnMagicWord) {
 			magicOffset = i
 			break
 		}
@@ -99,21 +97,18 @@ func (s *SaturnIdentifier) Identify(path string) (map[string]string, error) {
 		return nil, fmt.Errorf("Saturn magic word not found")
 	}
 
-	// Ensure we have enough data after magic word
-	if magicOffset+0xD0 > n {
-		// Need to re-open and read more data
-		reader.Close()
-		reader, err = fileio.OpenFile(path)
+	// Ensure we have enough data after magic word for full header
+	requiredSize := magicOffset + 0xD0
+	var header []byte
+	if uint32(len(initialHeaderBytes)) < uint32(requiredSize) {
+		// Read more data if needed
+		fullHeader, err := disc.ReadFile(0, uint32(requiredSize))
 		if err != nil {
-			return nil, fmt.Errorf("failed to reopen file: %w", err)
+			return nil, fmt.Errorf("failed to read full header: %w", err)
 		}
-		defer reader.Close()
-
-		header = make([]byte, magicOffset+0xD0)
-		n, err = reader.Read(header)
-		if err != nil || n < magicOffset+0xD0 {
-			return nil, fmt.Errorf("failed to read full header")
-		}
+		header = fullHeader
+	} else {
+		header = initialHeaderBytes
 	}
 
 	// Extract fields
@@ -204,7 +199,11 @@ func (s *SaturnIdentifier) Identify(path string) (map[string]string, error) {
 		if gameData, found := s.db.LookupGame("Saturn", serial); found {
 			// Add database fields to result
 			for key, value := range gameData {
-				result[key] = value
+				// Override existing data if preferDB is set, otherwise only add new
+				_, exists := result[key]
+				if preferDB || !exists {
+					result[key] = value
+				}
 			}
 		}
 	}

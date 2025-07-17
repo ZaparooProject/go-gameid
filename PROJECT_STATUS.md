@@ -33,7 +33,7 @@ The go-gameid project is a Go port of Python tools (GameID and ConsoleID) for vi
 - **SegaCD** - Sega CD
 - **PSP** - PlayStation Portable
 
-### Phase 5: CLI & Integration ✅ (Basic)
+### Phase 5: CLI & Integration ✅ COMPLETE
 - Full command-line argument parsing
 - Interactive mode when no arguments provided
 - Output formatting with customizable delimiter
@@ -41,6 +41,8 @@ The go-gameid project is a Go port of Python tools (GameID and ConsoleID) for vi
 - Error handling for edge cases
 - Test framework for CLI validation
 - Comparison script for Python compatibility testing
+- Advanced features (disc_uuid, disc_label, prefer_gamedb) ✅
+- Mounted disc directory support ✅
 
 ### Phase 6: Compatibility Improvements ✅ (2025-07-17)
 - **80% test compatibility achieved** (8/10 systems passing)
@@ -52,16 +54,16 @@ The go-gameid project is a Go port of Python tools (GameID and ConsoleID) for vi
 - Added N64/PSP fallback logic for missing database entries
 - Go implementation now more robust than Python for N64
 
-## Remaining Tasks (Advanced Features)
+## Remaining Tasks
 
 ### High Priority
-1. **disc_uuid and disc_label parameters** - Pass these to disc-based identifiers for mounted disc support
-2. **prefer_gamedb functionality** - Implement logic to prefer database metadata over file metadata
+1. **Real game validation** - Test with production database and actual game files
+2. **Security fixes** - Address path traversal and memory exhaustion risks identified in code review
 
 ### Medium Priority
-3. **Mounted disc directory support** - Add ISO 9660 support for reading from mounted directories
-4. **Real game validation** - Test with production database and actual game files
-5. **Performance optimization** - Benchmark against Python version
+3. **Performance optimization** - Benchmark against Python version
+4. **Documentation improvements** - Add godoc comments to all exported types
+5. **Logging framework** - Replace fmt.Fprintln with proper logging (logrus/zap)
 
 ### Low Priority
 6. **Documentation updates** - Complete README with usage examples
@@ -112,11 +114,31 @@ The project follows a modular architecture:
 - `pkg/binary/` - Binary parsing helpers
 - `pkg/iso9660/` - ISO 9660 file system support
 
+## Recent Accomplishments (2025-07-17 Latest Session)
+
+### Advanced Features Implementation
+1. **disc_uuid and disc_label parameters** ✅
+   - Added IdentifierWithOptions interface to GameCube, Saturn, and SegaCD
+   - Parameters properly passed through and used when provided
+   - Particularly useful with mounted disc directory support
+
+2. **prefer_gamedb functionality** ✅
+   - All identifiers now respect the preferDB parameter
+   - When true: database values override extracted metadata
+   - When false: database values only fill in missing fields
+
+3. **Mounted disc directory support** ✅
+   - Created MountedDisc class implementing DiscImage interface
+   - Created unified DiscImage interface for both ISO files and directories
+   - OpenImage function automatically detects directories vs files
+   - PSX, PS2, and PSP identifiers work seamlessly with mounted directories
+   - Full test coverage generated using zen's testgen tool
+
 ## Known Limitations
 
-1. **Advanced features not implemented**: disc_uuid, disc_label, prefer_gamedb
-2. **Mounted disc support**: Not yet implemented for ISO 9660
-3. **Database format**: Uses JSON instead of Python pickle (by design)
+1. **Database format**: Uses JSON instead of Python pickle (by design)
+2. **Security issues**: Path validation and size limits need to be added
+3. **ISO9660 recursive listing**: Not yet implemented (but not critical for game identification)
 
 ## Compatibility
 

@@ -31,15 +31,15 @@ func (p *PSPIdentifier) Identify(path string) (map[string]string, error) {
 
 // IdentifyWithOptions identifies a PSP game with additional parameters
 func (p *PSPIdentifier) IdentifyWithOptions(path, discUUID, discLabel string, preferDB bool) (map[string]string, error) {
-	// Open ISO file
-	iso, err := iso9660.OpenFile(path)
+	// Open ISO file or directory
+	disc, err := iso9660.OpenImage(path, discUUID, discLabel)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open ISO: %w", err)
+		return nil, fmt.Errorf("failed to open disc: %w", err)
 	}
-	defer iso.Close()
+	defer disc.Close()
 
 	// Look for UMD_DATA.BIN file
-	files, err := iso.ListFiles(true)
+	files, err := disc.ListFiles(true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list files: %w", err)
 	}
@@ -57,7 +57,7 @@ func (p *PSPIdentifier) IdentifyWithOptions(path, discUUID, discLabel string, pr
 	}
 
 	// Read UMD_DATA.BIN
-	umdData, err := iso.ReadFile(umdFile.LBA, umdFile.Size)
+	umdData, err := disc.ReadFileByEntry(umdFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read UMD_DATA.BIN: %w", err)
 	}

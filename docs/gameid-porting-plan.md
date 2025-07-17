@@ -373,15 +373,34 @@ go test -cover ./...
 - [x] SegaCD identifier ✅
 - [x] PSP identifier (UMD_DATA.BIN) ✅
 
-### Phase 5: CLI & Integration ✅ COMPLETED (Basic)
+### Phase 5: CLI & Integration ✅ COMPLETED
 - [x] Full CLI argument parsing ✅
 - [x] Interactive mode ✅
 - [x] Output formatting ✅
 - [x] End-to-end validation framework created ✅
-- [ ] Advanced features (disc_uuid, disc_label, prefer_gamedb)
-- [ ] Mounted disc directory support
+- [x] Advanced features (disc_uuid, disc_label, prefer_gamedb) ✅
+- [x] Mounted disc directory support ✅
 
 ## Recent Accomplishments (Latest Session - 2025-07-17)
+
+### ✅ Advanced CLI Features Implementation - Phase 5 Complete!
+- **disc_uuid and disc_label parameters** - Implemented for all disc-based systems
+  - Added `IdentifierWithOptions` interface to GameCube, Saturn, and SegaCD
+  - Parameters are passed through and used when provided
+  - Particularly useful with mounted disc directory support
+- **prefer_gamedb functionality** - Database preference logic implemented
+  - All identifiers now respect the `preferDB` parameter
+  - When true: database values override extracted metadata
+  - When false: database values only fill in missing fields
+- **Mounted disc directory support** - Complete ISO 9660 directory support
+  - Created `MountedDisc` class that implements `DiscImage` interface
+  - Created unified `DiscImage` interface for both ISO files and directories
+  - `OpenImage` function automatically detects directories vs files
+  - disc_uuid and disc_label parameters are used when opening directories
+  - PSX, PS2, and PSP identifiers work seamlessly with mounted directories
+  - Full test coverage for mounted disc functionality
+
+## Previous Session Accomplishments (2025-07-17 Morning)
 
 ### ✅ Compatibility Improvements - 80% Test Success!
 - **GB identifier fixed** - Licensee field mapping and title case handling
@@ -479,17 +498,16 @@ go test -cover ./...
 
 ### 🔧 Known Issues
 - **Real game tests failing** - Expected, requires production database with proper keys
-- **CLI not yet implemented** - Focus has been on core identification logic
-- **Mounted disc directory support** - Not yet implemented for ISO 9660
+- **PSP test data invalid** - Need to create valid ISO with UMD_DATA.BIN
 
 ## Next Immediate Steps
-1. **Advanced CLI features** - disc_uuid, disc_label parameters for disc-based systems
-2. **prefer_gamedb functionality** - Implement database preference logic
-3. **Mounted disc directory support** - Add support for reading from mounted disc directories
-4. **Real game testing** - Validate with production database and actual game files
-5. **Performance optimization** - Ensure Go version matches or exceeds Python performance
-6. **Documentation** - Update README with usage instructions
-7. **Improve PSP test data** - Create valid ISO with UMD_DATA.BIN for proper testing
+1. **Create valid PSP ISO test data** - Generate proper ISO with UMD_DATA.BIN for testing
+2. **Real game testing** - Validate with production database and actual game files
+3. **Performance optimization** - Ensure Go version matches or exceeds Python performance
+4. **Documentation** - Update README with usage instructions
+5. **Additional test coverage** - Generate comprehensive tests for all components
+6. **Code cleanup** - Remove any debug code or unnecessary comments
+7. **Final validation** - Run full comparison suite against Python implementation
 
 ## Success Criteria
 

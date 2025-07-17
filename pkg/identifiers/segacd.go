@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/wizzomafizzo/go-gameid/pkg/database"
-	"github.com/wizzomafizzo/go-gameid/pkg/fileio"
+	"github.com/wizzomafizzo/go-gameid/pkg/iso9660"
 )
 
 var (
@@ -38,34 +38,32 @@ func (s *SegaCDIdentifier) Console() string {
 
 // Identify identifies a SegaCD game and returns its metadata
 func (s *SegaCDIdentifier) Identify(path string) (map[string]string, error) {
-	// Handle CUE files by using the first BIN
-	if strings.HasSuffix(strings.ToLower(path), ".cue") {
-		// For now, we'll just return an error since we need CUE parsing
-		return nil, fmt.Errorf("CUE file support not yet implemented for SegaCD")
-	}
+	return s.IdentifyWithOptions(path, "", "", false)
+}
 
-	// Open file
-	reader, err := fileio.OpenFile(path)
+// IdentifyWithOptions identifies a SegaCD game with additional parameters
+func (s *SegaCDIdentifier) IdentifyWithOptions(path, discUUID, discLabel string, preferDB bool) (map[string]string, error) {
+	// Open disc image (ISO, CUE/BIN, or mounted directory)
+	disc, err := iso9660.OpenImage(path, discUUID, discLabel)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
+		return nil, fmt.Errorf("failed to open disc: %w", err)
 	}
-	defer reader.Close()
+	defer disc.Close()
 
-	// Read header (0x300 bytes)
-	header := make([]byte, 0x300)
-	n, err := reader.Read(header)
+	// Read header (0x300 bytes) from the disc image
+	initialHeaderBytes, err := disc.ReadFile(0, 0x300)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read header: %w", err)
 	}
-	if n < 0x210 { // Minimum size needed for header fields
+	if len(initialHeaderBytes) < 0x210 { // Minimum size needed for header fields
 		return nil, fmt.Errorf("file too small")
 	}
 
 	// Search for magic word
 	magicOffset := -1
 	for _, magicWord := range segaCDMagicWords {
-		for i := 0; i <= n-len(magicWord); i++ {
-			if bytes.Equal(header[i:i+len(magicWord)], magicWord) {
+		for i := 0; i <= len(initialHeaderBytes)-len(magicWord); i++ {
+			if bytes.Equal(initialHeaderBytes[i:i+len(magicWord)], magicWord) {
 				magicOffset = i
 				break
 			}
@@ -79,22 +77,17 @@ func (s *SegaCDIdentifier) Identify(path string) (map[string]string, error) {
 		return nil, fmt.Errorf("SegaCD magic word not found")
 	}
 
-	// Ensure we have enough data after magic word
+	// Ensure we have enough data after magic word for full header
 	requiredSize := magicOffset + 0x1A0
-	if requiredSize > n {
-		// Need to re-open and read more data
-		reader.Close()
-		reader, err = fileio.OpenFile(path)
+	var header []byte
+	if uint32(len(initialHeaderBytes)) < uint32(requiredSize) {
+		fullHeader, err := disc.ReadFile(0, uint32(requiredSize))
 		if err != nil {
-			return nil, fmt.Errorf("failed to reopen file: %w", err)
+			return nil, fmt.Errorf("failed to read full header: %w", err)
 		}
-		defer reader.Close()
-
-		header = make([]byte, requiredSize)
-		n, err = reader.Read(header)
-		if err != nil || n < requiredSize {
-			return nil, fmt.Errorf("failed to read full header")
-		}
+		header = fullHeader
+	} else {
+		header = initialHeaderBytes
 	}
 
 	// Extract fields
@@ -220,7 +213,11 @@ func (s *SegaCDIdentifier) Identify(path string) (map[string]string, error) {
 		if gameData, found := s.db.LookupGame("SegaCD", serial); found {
 			// Add database fields to result
 			for key, value := range gameData {
-				result[key] = value
+				// Override existing data if preferDB is set, otherwise only add new
+				_, exists := result[key]
+				if preferDB || !exists {
+					result[key] = value
+				}
 			}
 		}
 	}

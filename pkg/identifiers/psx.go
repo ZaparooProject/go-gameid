@@ -43,14 +43,14 @@ func (p *PSXIdentifier) Identify(path string) (map[string]string, error) {
 
 // IdentifyWithOptions identifies a PSX game with additional parameters
 func (p *PSXIdentifier) IdentifyWithOptions(path, discUUID, discLabel string, preferDB bool) (map[string]string, error) {
-	// Open ISO file
-	iso, err := iso9660.OpenFile(path)
+	// Open ISO file or directory
+	disc, err := iso9660.OpenImage(path, discUUID, discLabel)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open ISO: %w", err)
+		return nil, fmt.Errorf("failed to open disc: %w", err)
 	}
-	defer iso.Close()
+	defer disc.Close()
 
-	return p.identifyPSXPS2(iso, "PSX", psxPrefixes, discUUID, discLabel, preferDB)
+	return p.identifyPSXPS2(disc, "PSX", psxPrefixes, discUUID, discLabel, preferDB)
 }
 
 // PS2Identifier implements game identification for PlayStation 2
@@ -75,21 +75,22 @@ func (p *PS2Identifier) Identify(path string) (map[string]string, error) {
 
 // IdentifyWithOptions identifies a PS2 game with additional parameters
 func (p *PS2Identifier) IdentifyWithOptions(path, discUUID, discLabel string, preferDB bool) (map[string]string, error) {
-	// Open ISO file
-	iso, err := iso9660.OpenFile(path)
+	// Open ISO file or directory
+	disc, err := iso9660.OpenImage(path, discUUID, discLabel)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open ISO: %w", err)
+		return nil, fmt.Errorf("failed to open disc: %w", err)
 	}
-	defer iso.Close()
+	defer disc.Close()
 
 	identifier := &PSXIdentifier{db: p.db}
-	return identifier.identifyPSXPS2(iso, "PS2", ps2Prefixes, discUUID, discLabel, preferDB)
+	return identifier.identifyPSXPS2(disc, "PS2", ps2Prefixes, discUUID, discLabel, preferDB)
 }
 
 // identifyPSXPS2 is the shared implementation for PSX and PS2
-func (p *PSXIdentifier) identifyPSXPS2(iso *iso9660.ISO9660, console string, prefixes []string, discUUID, discLabel string, preferDB bool) (map[string]string, error) {
+func (p *PSXIdentifier) identifyPSXPS2(disc iso9660.DiscImage, console string, prefixes []string, discUUID, discLabel string, preferDB bool) (map[string]string, error) {
 	result := make(map[string]string)
 	var serial string
+	pvd := disc.GetPVD()
 
 	// Add disc UUID and label if provided
 	if discUUID != "" {
@@ -100,7 +101,7 @@ func (p *PSXIdentifier) identifyPSXPS2(iso *iso9660.ISO9660, console string, pre
 	}
 
 	// Get list of files in root directory
-	files, err := iso.ListFiles(true)
+	files, err := disc.ListFiles(true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list files: %w", err)
 	}
@@ -113,6 +114,7 @@ func (p *PSXIdentifier) identifyPSXPS2(iso *iso9660.ISO9660, console string, pre
 	}
 
 	// Try to find serial from filename pattern (SXXX_XXX.XX)
+serialFoundLoop:
 	for _, file := range files {
 		filename := strings.ToUpper(strings.TrimPrefix(file.Name, "/"))
 
@@ -134,7 +136,7 @@ func (p *PSXIdentifier) identifyPSXPS2(iso *iso9660.ISO9660, console string, pre
 								}
 							}
 							// Python doesn't output ID field
-							goto foundGame
+							break serialFoundLoop
 						}
 
 						// If that fails and we have more than just the prefix, try with underscore after prefix
@@ -151,19 +153,19 @@ func (p *PSXIdentifier) identifyPSXPS2(iso *iso9660.ISO9660, console string, pre
 								serial = altSerial
 								result["ID"] = strings.ReplaceAll(serial, "_", "-")
 								// Python doesn't output ID field
-								goto foundGame
+								break serialFoundLoop
 							}
 						}
 					}
-					goto foundGame
+					break serialFoundLoop
 				}
 			}
 		}
 	}
 
 	// If no serial found from files, try volume ID
-	if serial == "" && iso.PVD != nil {
-		volumeID := iso.PVD.VolumeID
+	if serial == "" && pvd != nil {
+		volumeID := pvd.VolumeID
 		if volumeID != "" {
 			// Convert volume ID to serial format
 			serial = strings.ReplaceAll(volumeID, "-", "_")
@@ -190,14 +192,13 @@ func (p *PSXIdentifier) identifyPSXPS2(iso *iso9660.ISO9660, console string, pre
 		}
 	}
 
-foundGame:
 	// Add ISO metadata
-	if iso.PVD != nil {
-		if iso.PVD.CreationDateTime != "" && result["uuid"] == "" {
-			result["uuid"] = iso.PVD.CreationDateTime
+	if pvd != nil {
+		if pvd.CreationDateTime != "" && result["uuid"] == "" {
+			result["uuid"] = pvd.CreationDateTime
 		}
-		if iso.PVD.VolumeID != "" && result["volume_ID"] == "" {
-			result["volume_ID"] = iso.PVD.VolumeID
+		if pvd.VolumeID != "" && result["volume_ID"] == "" {
+			result["volume_ID"] = pvd.VolumeID
 		}
 	}
 

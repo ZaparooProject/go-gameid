@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/wizzomafizzo/go-gameid/pkg/database"
-	"github.com/wizzomafizzo/go-gameid/pkg/fileio"
+	"github.com/wizzomafizzo/go-gameid/pkg/iso9660"
 )
 
 // GameCubeIdentifier implements game identification for GameCube
@@ -26,22 +26,26 @@ func (g *GameCubeIdentifier) Console() string {
 
 // Identify identifies a GameCube game and returns its metadata
 func (g *GameCubeIdentifier) Identify(path string) (map[string]string, error) {
-	// Open file
-	reader, err := fileio.OpenFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
-	}
-	defer reader.Close()
+	return g.IdentifyWithOptions(path, "", "", false)
+}
 
-	// Read GameCube header (0x440 bytes)
+// IdentifyWithOptions identifies a GameCube game with additional parameters
+func (g *GameCubeIdentifier) IdentifyWithOptions(path, discUUID, discLabel string, preferDB bool) (map[string]string, error) {
+	// Open disc image (ISO, CUE/BIN, or mounted directory)
+	disc, err := iso9660.OpenImage(path, discUUID, discLabel)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open disc: %w", err)
+	}
+	defer disc.Close()
+
+	// Read GameCube header (0x440 bytes) from the disc image
 	// https://hitmen.c02.at/files/yagcd/yagcd/chap13.html#sec13
-	header := make([]byte, 0x440)
-	n, err := reader.Read(header)
+	header, err := disc.ReadFile(0, 0x440) // Read from LBA 0, size 0x440
 	if err != nil {
 		return nil, fmt.Errorf("failed to read header: %w", err)
 	}
-	if n < 0x440 {
-		return nil, fmt.Errorf("file too small: expected at least 0x440 bytes, got %d", n)
+	if len(header) < 0x440 {
+		return nil, fmt.Errorf("file too small: expected at least 0x440 bytes, got %d", len(header))
 	}
 
 	// Extract fields from header
@@ -74,7 +78,11 @@ func (g *GameCubeIdentifier) Identify(path string) (map[string]string, error) {
 		if gameData, found := g.db.LookupGame("GC", id); found {
 			// Add database fields to result
 			for key, value := range gameData {
-				result[key] = value
+				// Override existing data if preferDB is set, otherwise only add new
+				_, exists := result[key]
+				if preferDB || !exists {
+					result[key] = value
+				}
 			}
 		}
 	}

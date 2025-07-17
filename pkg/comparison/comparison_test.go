@@ -1,15 +1,12 @@
 package comparison
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -113,8 +110,21 @@ func (tr *testRunner) runGoImplementation(console, filepath string) *testResult 
 		return result
 	}
 
-	// identify game
-	fields, err := identifier.Identify(filepath)
+	var fields map[string]string
+	var err error
+
+	// Use IdentifyWithOptions if available, otherwise fall back to Identify
+	if identWithOpts, ok := identifier.(identifiers.IdentifierWithOptions); ok {
+		// For comparison tests, we typically don't have discUUID/discLabel/preferDB from Python.
+		// Pass empty strings and false, assuming Python's default behavior or that these
+		// parameters are not critical for basic comparison. If Python's comparison script
+		// uses these, this part needs to be aligned.
+		fields, err = identWithOpts.IdentifyWithOptions(filepath, "", "", false)
+	} else {
+		// Fallback to the basic Identify method if IdentifierWithOptions is not implemented
+		fields, err = identifier.Identify(filepath)
+	}
+
 	if err != nil {
 		result.Error = fmt.Sprintf("Failed to identify game: %v", err)
 		result.Duration = time.Since(start)
@@ -262,7 +272,7 @@ func normalizeValue(value string) string {
 }
 
 // getIdentifier returns the appropriate identifier for the console
-func getIdentifier(console string, db *database.GameDatabase) interface{} {
+func getIdentifier(console string, db *database.GameDatabase) identifiers.Identifier {
 	switch console {
 	case "GB":
 		return identifiers.NewGBIdentifier(db)
@@ -314,7 +324,7 @@ func (tr *testRunner) findTestFiles() map[string][]string {
 }
 
 // detectConsole detects the console type from file path or extension
-func detectConsole(filepath string) string {
+func detectConsole(filePath string) string {
 	// map file extensions to consoles
 	extMap := map[string]string{
 		".gb":  "GB",
@@ -335,7 +345,7 @@ func detectConsole(filepath string) string {
 	}
 
 	// check directory names first
-	dirs := strings.Split(filepath, string(os.PathSeparator))
+	dirs := strings.Split(filePath, string(os.PathSeparator))
 	for _, dir := range dirs {
 		dir = strings.ToLower(dir)
 		switch dir {
@@ -365,7 +375,7 @@ func detectConsole(filepath string) string {
 	}
 
 	// check file extension
-	ext := strings.ToLower(filepath.Ext(filepath))
+	ext := strings.ToLower(filepath.Ext(filePath))
 	return extMap[ext]
 }
 

@@ -161,63 +161,56 @@ func cleanISOString(data []byte) string {
 
 // extractCreationDateTime extracts the creation date/time from PVD data
 func extractCreationDateTime(data []byte) string {
-	// UUID termination characters
-	uuidTermination := map[byte]bool{
-		'$': true,
-		'.': true,
+	// ISO 9660 specifies Creation Date/Time at offset 813, length 17 bytes.
+	// The format is YYYYMMDDHHMMSSFF (FF = fractional seconds, usually 00)
+	// followed by a single byte for timezone offset.
+	const uuidOffset = 813
+	const uuidLength = 17 // YYYYMMDDHHMMSSFF + 1 byte for timezone
+
+	if uuidOffset+uuidLength > len(data) {
+		return "" // Not enough data for UUID
 	}
 
-	// Find UUID (usually offset 813, but could be different)
-	uuidStartInd := 813
-	for i := 813; i < 830 && i < len(data); i++ {
-		if uuidTermination[data[i]] {
-			uuidStartInd = i - 16
+	rawUUIDBytes := data[uuidOffset : uuidOffset+uuidLength]
+
+	// Check if the first 16 bytes (date/time part) are all null bytes
+	allNulls := true
+	for i := 0; i < 16 && i < len(rawUUIDBytes); i++ {
+		if rawUUIDBytes[i] != 0x00 {
+			allNulls = false
 			break
 		}
 	}
-
-	if uuidStartInd+16 > len(data) {
-		return ""
+	if allNulls {
+		// Python formats null bytes as well, e.g., "\x00\x00\x00\x00-\x00\x00-\x00\x00-\x00\x00-\x00\x00-\x00\x00-\x00\x00"
+		return "\x00\x00\x00\x00-\x00\x00-\x00\x00-\x00\x00-\x00\x00-\x00\x00-\x00\x00"
 	}
 
-	uuid := data[uuidStartInd : uuidStartInd+16]
+	// Clean and format the date/time string (first 16 bytes)
+	// cleanISOString removes non-printable characters, including nulls.
+	uuidStr := cleanISOString(rawUUIDBytes[:16])
 
-	// Try to parse as text
-	uuidStr := cleanISOString(uuid)
+	// If after cleaning, it's too short to be a valid date string,
+	// return the cleaned string as is. This handles cases where it's
+	// not a valid date string but not all nulls.
 	if len(uuidStr) < 14 {
-		// Python formats null bytes as well
-		// Check if all zeros
-		allZeros := true
-		for _, b := range uuid {
-			if b != 0 {
-				allZeros = false
-				break
-			}
-		}
-		if allZeros {
-			// Format zeros like Python does: 0000-00-00-00-00-00
-			return "\x00\x00\x00\x00-\x00\x00-\x00\x00-\x00\x00-\x00\x00-\x00\x00-\x00\x00"
-		}
-		return string(uuid) // Return raw if too short
+		return uuidStr
 	}
 
-	// Format as YYYY-MM-DD-HH-MM-SS-??
-	if len(uuidStr) >= 14 {
-		formatted := uuidStr[:4] + "-" +
-			uuidStr[4:6] + "-" +
-			uuidStr[6:8] + "-" +
-			uuidStr[8:10] + "-" +
-			uuidStr[10:12] + "-" +
-			uuidStr[12:14]
+	// Format as YYYY-MM-DD-HH-MM-SS
+	formatted := uuidStr[:4] + "-" +
+		uuidStr[4:6] + "-" +
+		uuidStr[6:8] + "-" +
+		uuidStr[8:10] + "-" +
+		uuidStr[10:12] + "-" +
+		uuidStr[12:14]
 
-		if len(uuidStr) >= 16 {
-			formatted += "-" + uuidStr[14:16]
-		}
-
-		return formatted
+	// Add fractional seconds if available and valid
+	if len(uuidStr) >= 16 {
+		formatted += "-" + uuidStr[14:16]
 	}
 
-	return uuidStr
+	return formatted
 }
 
 // ListFiles lists files in the root directory
@@ -310,4 +303,9 @@ func (iso *ISO9660) ReadFile(lba, size uint32) ([]byte, error) {
 	}
 
 	return data, nil
+}
+
+// ReadFileByEntry reads a file using its FileEntry
+func (iso *ISO9660) ReadFileByEntry(entry *FileEntry) ([]byte, error) {
+	return iso.ReadFile(entry.LBA, entry.Size)
 }
