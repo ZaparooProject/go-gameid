@@ -13,7 +13,7 @@ func TestOpenFile_RegularFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.txt")
 	content := []byte("Hello, World!")
-	
+
 	if err := os.WriteFile(testFile, content, 0644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestOpenFile_GzipFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create gzip file: %v", err)
 	}
-	
+
 	gw := gzip.NewWriter(f)
 	if _, err := gw.Write(content); err != nil {
 		t.Fatalf("Failed to write gzip content: %v", err)
@@ -79,7 +79,7 @@ func TestOpenFile_Stdin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open stdin: %v", err)
 	}
-	
+
 	// We can't easily test reading from stdin in unit tests
 	// Just ensure it doesn't error
 	if reader == nil {
@@ -99,7 +99,7 @@ func TestGetSize_RegularFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.bin")
 	content := make([]byte, 1234) // 1234 bytes
-	
+
 	if err := os.WriteFile(testFile, content, 0644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestGetSize_RegularFile(t *testing.T) {
 func TestGetSize_Directory(t *testing.T) {
 	// Create directory with files
 	tmpDir := t.TempDir()
-	
+
 	// Create some files
 	files := []struct {
 		name string
@@ -131,7 +131,7 @@ func TestGetSize_Directory(t *testing.T) {
 	totalSize := int64(0)
 	for _, f := range files {
 		path := filepath.Join(tmpDir, f.name)
-		os.MkdirAll(filepath.Dir(path), 0755)
+		_ = os.MkdirAll(filepath.Dir(path), 0755)
 		content := make([]byte, f.size)
 		if err := os.WriteFile(path, content, 0644); err != nil {
 			t.Fatalf("Failed to create test file %s: %v", f.name, err)
@@ -178,7 +178,7 @@ func TestBinsFromCue(t *testing.T) {
 	// Create a test CUE file
 	tmpDir := t.TempDir()
 	cueFile := filepath.Join(tmpDir, "test.cue")
-	
+
 	cueContent := `FILE "track01.bin" BINARY
   TRACK 01 MODE2/2352
     INDEX 01 00:00:00
@@ -223,7 +223,7 @@ func TestCheckExists(t *testing.T) {
 	// Create test file
 	tmpDir := t.TempDir()
 	existingFile := filepath.Join(tmpDir, "exists.txt")
-	os.WriteFile(existingFile, []byte("test"), 0644)
+	_ = os.WriteFile(existingFile, []byte("test"), 0644)
 
 	tests := []struct {
 		path    string

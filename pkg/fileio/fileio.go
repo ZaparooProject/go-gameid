@@ -108,17 +108,15 @@ func GetSize(path string) (int64, error) {
 // GetExtension returns the lowercase extension of a file, stripping .gz if present
 func GetExtension(filename string) string {
 	filename = strings.ToLower(filename)
-	
+
 	// Strip .gz extension if present
-	if strings.HasSuffix(filename, ".gz") {
-		filename = filename[:len(filename)-3]
-	}
-	
+	filename = strings.TrimSuffix(filename, ".gz")
+
 	ext := filepath.Ext(filename)
 	if ext == "" {
 		return ""
 	}
-	
+
 	// Remove the leading dot
 	return ext[1:]
 }
@@ -137,7 +135,7 @@ func BinsFromCue(cuePath string) ([]string, error) {
 
 	var bins []string
 	cueDir := filepath.Dir(cuePath)
-	
+
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())

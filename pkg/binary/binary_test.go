@@ -8,9 +8,9 @@ import (
 
 func TestReadUint16BE(t *testing.T) {
 	tests := []struct {
-		name  string
-		data  []byte
-		want  uint16
+		name    string
+		data    []byte
+		want    uint16
 		wantErr bool
 	}{
 		{"Valid data", []byte{0x12, 0x34}, 0x1234, false},
@@ -37,9 +37,9 @@ func TestReadUint16BE(t *testing.T) {
 
 func TestReadUint16LE(t *testing.T) {
 	tests := []struct {
-		name  string
-		data  []byte
-		want  uint16
+		name    string
+		data    []byte
+		want    uint16
 		wantErr bool
 	}{
 		{"Valid data", []byte{0x34, 0x12}, 0x1234, false},
@@ -65,9 +65,9 @@ func TestReadUint16LE(t *testing.T) {
 
 func TestReadUint32BE(t *testing.T) {
 	tests := []struct {
-		name  string
-		data  []byte
-		want  uint32
+		name    string
+		data    []byte
+		want    uint32
 		wantErr bool
 	}{
 		{"Valid data", []byte{0x12, 0x34, 0x56, 0x78}, 0x12345678, false},
@@ -161,7 +161,7 @@ func TestExtractString(t *testing.T) {
 func TestCalculateChecksum(t *testing.T) {
 	// Test simple checksum calculation
 	data := []byte{0x01, 0x02, 0x03, 0x04, 0x05}
-	
+
 	// Test 8-bit checksum
 	checksum8 := CalculateChecksum8(data)
 	expected8 := uint8(0x01 + 0x02 + 0x03 + 0x04 + 0x05)

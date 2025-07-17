@@ -57,7 +57,7 @@ func ExtractString(data []byte, offset, length int) string {
 // CleanString removes non-printable characters and null-terminates at first 0x00
 func CleanString(data []byte) string {
 	result := make([]byte, 0, len(data))
-	
+
 	for _, b := range data {
 		if b == 0 {
 			// Null termination
@@ -71,7 +71,7 @@ func CleanString(data []byte) string {
 			result = append(result, ' ')
 		}
 	}
-	
+
 	return string(result)
 }
 
@@ -98,7 +98,7 @@ func N64EndianSwap(data []byte) []byte {
 	if len(data)%2 != 0 {
 		panic("N64EndianSwap requires even-length data")
 	}
-	
+
 	result := make([]byte, len(data))
 	for i := 0; i < len(data); i += 2 {
 		result[i] = data[i+1]

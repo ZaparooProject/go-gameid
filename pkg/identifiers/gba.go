@@ -19,6 +19,13 @@ type Identifier interface {
 	Console() string
 }
 
+// IdentifierWithOptions extends Identifier with additional options
+type IdentifierWithOptions interface {
+	Identifier
+	// IdentifyWithOptions identifies a game with additional parameters
+	IdentifyWithOptions(path, discUUID, discLabel string, preferDB bool) (map[string]string, error)
+}
+
 // gbaLogo is the Nintendo logo that must be present in GBA ROMs
 var gbaLogo = []byte{
 	0x24, 0xFF, 0xAE, 0x51, 0x69, 0x9A, 0xA2, 0x21, 0x3D, 0x84, 0x82, 0x0A,
@@ -97,9 +104,6 @@ func (g *GBIdentifier) Identify(path string) (map[string]string, error) {
 	// Parse header fields
 	internalTitle := binary.CleanString(data[0x134:0x144])
 
-	// Manufacturer code (0x13F-0x142 for newer games, but GB games typically don't have this)
-	manufacturerCode := "N/A"
-
 	// CGB flag (0x143)
 	cgbFlag := data[0x143]
 	var cgbMode string
@@ -158,9 +162,6 @@ func (g *GBIdentifier) Identify(path string) (map[string]string, error) {
 		"header_checksum_actual":   fmt.Sprintf("0x%02x", headerChecksumActual),
 		"global_checksum_expected": fmt.Sprintf("0x%04x", globalChecksumExpected),
 		"global_checksum_actual":   fmt.Sprintf("0x%04x", globalChecksumActual),
-		"language":                 "N/A", // GB doesn't have language field
-		"manufacturer_code":        manufacturerCode,
-		"region":                   "NTSC-U", // Default for now
 	}
 
 	// Look up in database for title
@@ -175,9 +176,9 @@ func (g *GBIdentifier) Identify(path string) (map[string]string, error) {
 		}
 	}
 
-	// If no title found in database, try to clean up internal title
+	// If no title found in database, use internal title as-is (Python compatibility)
 	if result["title"] == "" {
-		result["title"] = cleanGBTitle(internalTitle)
+		result["title"] = internalTitle
 	}
 
 	return result, nil
@@ -277,7 +278,7 @@ func getLicensee(oldCode byte, newCode []byte) string {
 	if oldCode == 0x33 && len(newCode) >= 2 {
 		code := string(newCode)
 		licensees := map[string]string{
-			"01": "Nintendo",
+			"01": "Nintendo R&D1",
 			"08": "Capcom",
 			"09": "Hot-B",
 			"0A": "Jaleco",
@@ -434,7 +435,7 @@ func getLicensee(oldCode byte, newCode []byte) string {
 	// Old licensee codes
 	oldLicensees := map[byte]string{
 		0x00: "None",
-		0x01: "Nintendo",
+		0x01: "Nintendo R&D1",
 		0x08: "Capcom",
 		0x09: "Hot-B",
 		0x0A: "Jaleco",
@@ -701,30 +702,30 @@ func (n *N64Identifier) Identify(path string) (map[string]string, error) {
 	// Build serial number
 	serial := fmt.Sprintf("%c%c%c", cartridgeID[0], cartridgeID[1], countryCode)
 
-	// Look up in database
+	// Build result - always return basic metadata
+	result := make(map[string]string)
+	result["ID"] = serial
+
+	// Extract internal title from ROM
+	internalTitle := strings.TrimSpace(binary.CleanString(header[0x20:0x34]))
+	if internalTitle != "" {
+		result["internal_title"] = internalTitle
+		result["title"] = internalTitle // Use internal title as default title
+	}
+
+	// Look up in database to enhance with additional metadata
 	if n.db != nil {
 		if gameData, found := n.db.LookupGame("N64", serial); found {
-			result := make(map[string]string)
-
 			// Copy all database fields
 			for key, value := range gameData {
 				result[key] = value
 			}
-
-			// Always set the ID from the serial
+			// Always keep the serial as ID
 			result["ID"] = serial
-
-			// Extract internal title from ROM if prefer_gamedb is false (default behavior)
-			internalTitle := strings.TrimSpace(binary.CleanString(header[0x20:0x34]))
-			if internalTitle != "" {
-				result["title"] = internalTitle
-			}
-
-			return result, nil
 		}
 	}
 
-	return nil, fmt.Errorf("N64 game not found (%c%c %c): %s", cartridgeID[0], cartridgeID[1], countryCode, path)
+	return result, nil
 }
 
 // SNESIdentifier implements game identification for Super Nintendo
@@ -824,7 +825,7 @@ func (s *SNESIdentifier) Identify(path string) (map[string]string, error) {
 
 	// ROM makeup byte
 	romMakeup := header[0x15]
-	
+
 	// Fast/Slow ROM
 	fastSlowROM := "SlowROM"
 	if (romMakeup & 0x10) != 0 {
@@ -875,14 +876,10 @@ func (s *SNESIdentifier) Identify(path string) (map[string]string, error) {
 		"rom_version":    fmt.Sprintf("%d", romVersion),
 		"checksum":       fmt.Sprintf("0x%04x", checksum),
 		"hardware":       hardware,
-		"language":       "N/A",
-		"region":         "NTSC-U", // Default, could be determined from country code
 	}
 
-	// Generate gamedb ID using trimmed title for database lookup
-	gamedbID := fmt.Sprintf("%d,%s,%d,%d", developerID, trimmedTitleHex, romVersion, checksum)
-
-
+	// Generate gamedb ID using full title for database lookup (matches Python version)
+	gamedbID := fmt.Sprintf("%d,%s,%d,%d", developerID, internalTitleHex, romVersion, checksum)
 
 	// Look up in database
 	if s.db != nil {
@@ -930,7 +927,7 @@ func getHardwareType(cartridgeType byte, data []byte, headerStart int) string {
 	// Determine coprocessor type
 	upperDigit := (cartridgeType >> 4) & 0x0F
 	// coprocessor := ""
-	
+
 	switch upperDigit {
 	case 0:
 		// coprocessor = "DSP"
@@ -1044,14 +1041,4 @@ func (g *GBAIdentifier) Identify(path string) (map[string]string, error) {
 	}
 
 	return result, nil
-}
-
-// Legacy function for backward compatibility
-func IdentifyGBA(path string) (string, error) {
-	identifier := &GBAIdentifier{}
-	result, err := identifier.Identify(path)
-	if err != nil {
-		return "", err
-	}
-	return result["ID"], nil
 }

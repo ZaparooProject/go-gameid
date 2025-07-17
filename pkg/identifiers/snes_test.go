@@ -64,8 +64,6 @@ func TestSNESIdentify_RealGames(t *testing.T) {
 			checkField("checksum")
 			checkField("hardware")
 			checkField("title")
-			checkField("language")
-			checkField("region")
 		})
 	}
 }
@@ -76,7 +74,7 @@ func TestSNESIdentify_Synthetic(t *testing.T) {
 	testDB := &database.GameDatabase{
 		Systems: map[string]database.SystemDatabase{
 			"SNES": {
-				"1,0x54455354205346432047414d45,0,255": database.GameMetadata{
+				"1,0x54455354205346432047414d452020202020202020,0,255": database.GameMetadata{
 					"internal_title": "0x54455354205346432047414d452020202020202020",
 					"title":          "Test SNES Game",
 					"developer":      "Test Developer",
@@ -152,10 +150,9 @@ func TestSNESIdentify_Synthetic(t *testing.T) {
 		"rom_type":       "LoROM",
 		"developer_ID":   "0x01",
 		"rom_version":    "0",
+		"checksum":       "0xff00",
 		"hardware":       "ROM",
 		"title":          "Test SNES Game",
-		"language":       "N/A",
-		"region":         "NTSC-U",
 	}
 
 	for field, want := range expected {

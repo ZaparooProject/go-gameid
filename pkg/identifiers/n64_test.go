@@ -204,9 +204,22 @@ func TestN64Identify_GameNotInDB(t *testing.T) {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 
-	_, err := identifier.Identify(testFile)
-	if err == nil {
-		t.Error("Expected error for unknown game not in database")
+	result, err := identifier.Identify(testFile)
+	if err != nil {
+		t.Fatalf("Should not error for unknown game: %v", err)
+	}
+
+	// Should return basic metadata even without database
+	if result["ID"] != "XXE" {
+		t.Errorf("Expected ID 'XXE', got %q", result["ID"])
+	}
+
+	if result["internal_title"] != "Unknown Game" {
+		t.Errorf("Expected internal_title 'Unknown Game', got %q", result["internal_title"])
+	}
+
+	if result["title"] != "Unknown Game" {
+		t.Errorf("Expected title 'Unknown Game', got %q", result["title"])
 	}
 }
 

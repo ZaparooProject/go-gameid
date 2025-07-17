@@ -16,12 +16,12 @@ func (db *GameDatabase) LookupGame(system, gameID string) (GameMetadata, bool) {
 	if db == nil || db.Systems == nil {
 		return nil, false
 	}
-	
+
 	systemDB, ok := db.Systems[system]
 	if !ok {
 		return nil, false
 	}
-	
+
 	game, ok := systemDB[gameID]
 	return game, ok
 }

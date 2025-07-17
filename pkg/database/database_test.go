@@ -17,17 +17,17 @@ func TestLoadDatabase(t *testing.T) {
 	testDB := map[string]map[string]map[string]string{
 		"GBA": {
 			"AGBE": {
-				"title":       "Golden Sun",
-				"region":      "USA",
-				"developer":   "Camelot",
-				"publisher":   "Nintendo",
+				"title":        "Golden Sun",
+				"region":       "USA",
+				"developer":    "Camelot",
+				"publisher":    "Nintendo",
 				"release_date": "2001-11-11",
 			},
 			"BPRE": {
-				"title":       "Pokemon Ruby",
-				"region":      "USA",
-				"developer":   "Game Freak",
-				"publisher":   "Nintendo",
+				"title":        "Pokemon Ruby",
+				"region":       "USA",
+				"developer":    "Game Freak",
+				"publisher":    "Nintendo",
 				"release_date": "2003-03-19",
 			},
 		},
@@ -154,7 +154,7 @@ func TestLookupGame(t *testing.T) {
 
 func TestLoadDatabase_FromURL(t *testing.T) {
 	t.Skip("Skipping URL loading test - implement when needed")
-	
+
 	// This would test loading from the Python GameID database URL
 	// For now, we'll focus on local file loading
 }

@@ -23,8 +23,6 @@ go.work.sum
 
 db.pkl
 db.pkl.gz
-
 dbs
 /main
-dbs
-.chunkhound
+/gameid
