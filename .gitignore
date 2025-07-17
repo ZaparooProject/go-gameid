@@ -26,3 +26,6 @@ db.pkl.gz
 dbs
 /main
 /gameid
+
+# Comparison test results
+comparison_results/
