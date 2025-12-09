@@ -1,3 +1,3 @@
-module github.com/wizzomafizzo/go-gameid
+module github.com/ZaparooProject/go-gameid
 
-go 1.22.4
+go 1.21

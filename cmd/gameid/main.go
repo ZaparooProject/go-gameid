@@ -1,246 +1,149 @@
+// Command gameid identifies video game files and returns metadata.
 package main
 
 import (
-	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 
-	"github.com/wizzomafizzo/go-gameid/pkg/database"
-	"github.com/wizzomafizzo/go-gameid/pkg/identifiers"
+	"github.com/ZaparooProject/go-gameid"
 )
 
-const version = "1.0.0"
+var (
+	inputFile    = flag.String("i", "", "input file path (required)")
+	console      = flag.String("c", "", "console type (auto-detect if omitted)")
+	dbPath       = flag.String("db", "", "path to game database (gob.gz file)")
+	jsonOutput   = flag.Bool("json", false, "output as JSON")
+	listConsoles = flag.Bool("list-consoles", false, "list supported consoles and exit")
+	version      = flag.Bool("version", false, "print version and exit")
+)
 
-var supportedConsoles = []string{
-	"GBA", "GB", "GBC", "N64", "SNES", "Genesis",
-	"PSX", "PS2", "GC", "Saturn", "SegaCD", "PSP",
-}
-
-func printError(msg string) {
-	fmt.Fprintln(os.Stderr, msg)
-	os.Exit(1)
-}
-
-func printLog(msg string) {
-	fmt.Fprint(os.Stderr, msg)
-}
-
-func getIdentifier(console string, db *database.GameDatabase) identifiers.Identifier {
-	switch strings.ToUpper(console) {
-	case "GBA":
-		return identifiers.NewGBAIdentifier(db)
-	case "GB", "GBC":
-		return identifiers.NewGBIdentifier(db)
-	case "N64":
-		return identifiers.NewN64Identifier(db)
-	case "SNES":
-		return identifiers.NewSNESIdentifier(db)
-	case "GENESIS":
-		return identifiers.NewGenesisIdentifier(db)
-	case "PSX":
-		return identifiers.NewPSXIdentifier(db)
-	case "PS2":
-		return identifiers.NewPS2Identifier(db)
-	case "GC":
-		return identifiers.NewGameCubeIdentifier(db)
-	case "SATURN":
-		return identifiers.NewSaturnIdentifier(db)
-	case "SEGACD":
-		return identifiers.NewSegaCDIdentifier(db)
-	case "PSP":
-		return identifiers.NewPSPIdentifier(db)
-	default:
-		return nil
-	}
-}
-
-func interactiveMode() (string, string) {
-	reader := bufio.NewReader(os.Stdin)
-
-	printLog(fmt.Sprintf("=== GameID v%s ===\n", version))
-
-	// get game filename
-	var inputFile string
-	for inputFile == "" {
-		printLog("Enter game filename (no quotes): ")
-		input, _ := reader.ReadString('\n')
-		inputFile = strings.TrimSpace(input)
-
-		if inputFile != "" && !fileExists(inputFile) && !strings.HasPrefix(strings.ToLower(inputFile), "/dev/") {
-			printLog(fmt.Sprintf("ERROR: File/folder not found: %s\n\n", inputFile))
-			inputFile = ""
-		}
-	}
-
-	// get console
-	var console string
-	for console == "" {
-		printLog(fmt.Sprintf("Enter console (options: %s): ", strings.Join(supportedConsoles, ", ")))
-		input, _ := reader.ReadString('\n')
-		console = strings.TrimSpace(input)
-
-		if getIdentifier(console, nil) == nil {
-			printLog(fmt.Sprintf("ERROR: Invalid console: %s\n\n", console))
-			console = ""
-		}
-	}
-
-	return inputFile, console
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
+const appVersion = "0.1.0"
 
 func main() {
-	// define command line flags
-	var (
-		inputFile   = flag.String("i", "", "Input Game File")
-		input       = flag.String("input", "", "Input Game File")
-		console     = flag.String("c", "", "Console (options: "+strings.Join(supportedConsoles, ", ")+")")
-		consoleL    = flag.String("console", "", "Console")
-		databaseF   = flag.String("d", "", "GameID Database (db.pkl.gz)")
-		databaseL   = flag.String("database", "", "GameID Database")
-		outputFile  = flag.String("o", "stdout", "Output File")
-		outputL     = flag.String("output", "stdout", "Output File")
-		discUUID    = flag.String("disc_uuid", "", "Disc UUID (if already known)")
-		discLabel   = flag.String("disc_label", "", "Disc Label / Volume ID (if already known)")
-		delimiter   = flag.String("delimiter", "\t", "Delimiter")
-		preferDB    = flag.Bool("prefer_gamedb", false, "Prefer Metadata in GameDB (rather than metadata loaded from game)")
-		versionFlag = flag.Bool("version", false, fmt.Sprintf("Print GameID Version (%s)", version))
-	)
-
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s -i <file> [options]\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Identifies video game files and returns metadata.\n\n")
+		fmt.Fprintf(os.Stderr, "Options:\n")
+		flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "\nExamples:\n")
+		fmt.Fprintf(os.Stderr, "  %s -i game.gba\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s -i game.iso -c PSX\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s -i game.n64 -db gamedb.gob.gz -json\n", os.Args[0])
+	}
 	flag.Parse()
 
-	// handle version flag
-	if *versionFlag {
-		fmt.Printf("GameID v%s\n", version)
+	if *version {
+		fmt.Printf("gameid version %s\n", appVersion)
 		os.Exit(0)
 	}
 
-	// merge short and long flags
-	if *inputFile == "" && *input != "" {
-		*inputFile = *input
-	}
-	if *console == "" && *consoleL != "" {
-		*console = *consoleL
-	}
-	if *databaseF == "" && *databaseL != "" {
-		*databaseF = *databaseL
-	}
-	if *outputFile == "stdout" && *outputL != "stdout" {
-		*outputFile = *outputL
+	if *listConsoles {
+		fmt.Println("Supported consoles:")
+		for _, c := range gameid.AllConsoles {
+			fmt.Printf("  %s\n", c)
+		}
+		os.Exit(0)
 	}
 
-	// interactive mode if no args
-	if *inputFile == "" || *console == "" {
-		if len(os.Args) == 1 {
-			*inputFile, *console = interactiveMode()
-		} else {
-			flag.Usage()
+	if *inputFile == "" {
+		fmt.Fprintf(os.Stderr, "Error: input file required (-i)\n")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	// Load database if specified
+	var db *gameid.GameDatabase
+	if *dbPath != "" {
+		var err error
+		db, err = gameid.LoadDatabase(*dbPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading database: %v\n", err)
 			os.Exit(1)
 		}
 	}
 
-	// validate required args
-	if *inputFile == "" {
-		printError("Input file is required")
-	}
-	if *console == "" {
-		printError("Console is required")
-	}
-
-	// check if input file exists
-	if !fileExists(*inputFile) && !strings.HasPrefix(strings.ToLower(*inputFile), "/dev/") {
-		printError(fmt.Sprintf("File/folder not found: %s", *inputFile))
-	}
-
-	// determine database path
-	dbPath := *databaseF
-	if dbPath == "" {
-		// try to find database in standard locations
-		possiblePaths := []string{
-			"dbs/gameid_db.json",
-			filepath.Join(filepath.Dir(os.Args[0]), "dbs/gameid_db.json"),
-			filepath.Join(filepath.Dir(os.Args[0]), "../dbs/gameid_db.json"),
-		}
-		for _, path := range possiblePaths {
-			if fileExists(path) {
-				dbPath = path
-				break
-			}
-		}
-	}
-
-	// load database
-	var db *database.GameDatabase
-	if dbPath != "" {
-		var err error
-		db, err = database.LoadDatabase(dbPath)
-		if err != nil {
-			// database is optional, so just warn
-			fmt.Fprintf(os.Stderr, "Warning: Failed to load database: %v\n", err)
-		}
-	}
-
-	// get identifier
-	identifier := getIdentifier(*console, db)
-	if identifier == nil {
-		printError(fmt.Sprintf("Unknown console: %s", *console))
-	}
-
-	// identify game
-	var result map[string]string
+	// Identify the game
+	var result *gameid.Result
 	var err error
 
-	// Try to use IdentifierWithOptions if available
-	if identWithOpts, ok := identifier.(identifiers.IdentifierWithOptions); ok {
-		result, err = identWithOpts.IdentifyWithOptions(*inputFile, *discUUID, *discLabel, *preferDB)
-	} else {
-		result, err = identifier.Identify(*inputFile)
-	}
-	if err != nil {
-		printError(fmt.Sprintf("Failed to identify game: %v", err))
-	}
-
-	if result == nil || len(result) == 0 {
-		printError(fmt.Sprintf("%s game not found: %s", *console, *inputFile))
-	}
-
-	// replace empty string values with 'None'
-	for k, v := range result {
-		if strings.TrimSpace(v) == "" {
-			result[k] = "None"
-		}
-	}
-
-	// prepare output
-	var outputWriter *os.File
-	if *outputFile == "stdout" {
-		outputWriter = os.Stdout
-	} else {
-		var err error
-		outputWriter, err = os.Create(*outputFile)
+	if *console != "" {
+		// Console specified, use it directly
+		c, err := gameid.ParseConsole(*console)
 		if err != nil {
-			printError(fmt.Sprintf("Failed to create output file: %v", err))
+			fmt.Fprintf(os.Stderr, "Error: unknown console '%s'\n", *console)
+			fmt.Fprintf(os.Stderr, "Use -list-consoles to see supported consoles\n")
+			os.Exit(1)
 		}
-		defer outputWriter.Close()
+		result, err = gameid.IdentifyWithConsole(*inputFile, c, db)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error identifying game: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		// Auto-detect console
+		result, err = gameid.Identify(*inputFile, db)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error identifying game: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
-	// sort keys for consistent output
-	keys := make([]string, 0, len(result))
-	for k := range result {
-		keys = append(keys, k)
+	// Output results
+	if *jsonOutput {
+		outputJSON(result)
+	} else {
+		outputText(result)
 	}
-	sort.Strings(keys)
+}
 
-	// write output
-	for _, k := range keys {
-		fmt.Fprintf(outputWriter, "%s%s%s\n", k, *delimiter, result[k])
+func outputJSON(result *gameid.Result) {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(result); err != nil {
+		fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func outputText(result *gameid.Result) {
+	fmt.Printf("Console: %s\n", result.Console)
+	if result.ID != "" {
+		fmt.Printf("ID: %s\n", result.ID)
+	}
+	if result.Title != "" {
+		fmt.Printf("Title: %s\n", result.Title)
+	}
+	if result.InternalTitle != "" && result.InternalTitle != result.Title {
+		fmt.Printf("Internal Title: %s\n", result.InternalTitle)
+	}
+	if result.Region != "" {
+		fmt.Printf("Region: %s\n", result.Region)
+	}
+
+	// Print other metadata (skip those already printed)
+	skipKeys := map[string]bool{
+		"ID": true, "title": true, "internal_title": true, "region": true,
+	}
+
+	if len(result.Metadata) > 0 {
+		var otherKeys []string
+		for k := range result.Metadata {
+			if !skipKeys[k] {
+				otherKeys = append(otherKeys, k)
+			}
+		}
+
+		if len(otherKeys) > 0 {
+			fmt.Println("\nMetadata:")
+			for _, k := range otherKeys {
+				// Format key for display
+				displayKey := strings.ReplaceAll(k, "_", " ")
+				displayKey = strings.Title(displayKey)
+				fmt.Printf("  %s: %s\n", displayKey, result.Metadata[k])
+			}
+		}
 	}
 }

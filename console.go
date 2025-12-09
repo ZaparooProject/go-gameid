@@ -1,0 +1,330 @@
+package gameid
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/ZaparooProject/go-gameid/identifier"
+	"github.com/ZaparooProject/go-gameid/iso9660"
+)
+
+// Extension to console mapping
+// Only includes unambiguous mappings (single console per extension)
+var extToConsole = map[string]identifier.Console{
+	// Game Boy / Game Boy Color
+	".gb":  identifier.ConsoleGB,
+	".gbc": identifier.ConsoleGBC,
+
+	// Game Boy Advance
+	".gba": identifier.ConsoleGBA,
+	".srl": identifier.ConsoleGBA,
+
+	// Nintendo 64
+	".n64": identifier.ConsoleN64,
+	".z64": identifier.ConsoleN64,
+	".v64": identifier.ConsoleN64,
+	".ndd": identifier.ConsoleN64,
+
+	// NES
+	".nes": identifier.ConsoleNES,
+	".fds": identifier.ConsoleNES,
+	".unf": identifier.ConsoleNES,
+	".nez": identifier.ConsoleNES,
+
+	// SNES
+	".sfc": identifier.ConsoleSNES,
+	".smc": identifier.ConsoleSNES,
+	".swc": identifier.ConsoleSNES,
+
+	// Genesis / Mega Drive
+	".gen": identifier.ConsoleGenesis,
+	".md":  identifier.ConsoleGenesis,
+	".smd": identifier.ConsoleGenesis,
+
+	// GameCube
+	".gcm": identifier.ConsoleGC,
+	".gcz": identifier.ConsoleGC,
+	".rvz": identifier.ConsoleGC,
+}
+
+// Ambiguous extensions that need header analysis
+var ambiguousExts = map[string]bool{
+	".bin": true,
+	".iso": true,
+	".cue": true,
+	".chd": true,
+	".cso": true,
+	".ecm": true,
+}
+
+// DetectConsole attempts to detect the console type for a given file.
+// Returns the detected console or an error if detection fails.
+func DetectConsole(path string) (identifier.Console, error) {
+	// Check if it's a block device (physical disc)
+	if isBlockDevice(path) {
+		return detectConsoleFromBlockDevice(path)
+	}
+
+	// Check if it's a directory (mounted disc)
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return detectConsoleFromDirectory(path)
+	}
+
+	// Get extension
+	ext := strings.ToLower(filepath.Ext(path))
+
+	// Strip .gz suffix
+	if ext == ".gz" {
+		path = strings.TrimSuffix(path, ext)
+		ext = strings.ToLower(filepath.Ext(path))
+	}
+
+	// Check for unambiguous extension
+	if console, ok := extToConsole[ext]; ok {
+		return console, nil
+	}
+
+	// For ambiguous extensions, read header and analyze
+	if ambiguousExts[ext] {
+		return detectConsoleFromHeader(path, ext)
+	}
+
+	return "", identifier.ErrNotSupported{Format: ext}
+}
+
+// detectConsoleFromDirectory detects console from a mounted disc directory
+func detectConsoleFromDirectory(path string) (identifier.Console, error) {
+	// Check for PSP (UMD_DATA.BIN)
+	if fileExists(filepath.Join(path, "UMD_DATA.BIN")) {
+		return identifier.ConsolePSP, nil
+	}
+
+	// Check for NeoGeoCD (IPL.TXT)
+	if fileExists(filepath.Join(path, "IPL.TXT")) {
+		return identifier.ConsoleNeoGeoCD, nil
+	}
+
+	// Check for PS2/PSX (SYSTEM.CNF)
+	systemCnfPath := filepath.Join(path, "SYSTEM.CNF")
+	if fileExists(systemCnfPath) {
+		data, err := os.ReadFile(systemCnfPath)
+		if err == nil {
+			content := strings.ToUpper(string(data))
+			if strings.Contains(content, "BOOT2") {
+				return identifier.ConsolePS2, nil
+			}
+			if strings.Contains(content, "BOOT") {
+				return identifier.ConsolePSX, nil
+			}
+		}
+	}
+
+	return "", identifier.ErrNotSupported{Format: "directory"}
+}
+
+// detectConsoleFromHeader reads the file header to determine console type
+func detectConsoleFromHeader(path string, ext string) (identifier.Console, error) {
+	// Handle CUE files specially
+	if ext == ".cue" {
+		return detectConsoleFromCue(path)
+	}
+
+	// Read header for analysis
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	header := make([]byte, 0x1000)
+	n, err := f.Read(header)
+	if err != nil {
+		return "", err
+	}
+	header = header[:n]
+
+	// Try various magic word checks
+
+	// GameCube magic at 0x1C
+	if len(header) > 0x20 {
+		if identifier.ValidateGC(header) {
+			return identifier.ConsoleGC, nil
+		}
+	}
+
+	// Saturn magic
+	if identifier.ValidateSaturn(header) {
+		return identifier.ConsoleSaturn, nil
+	}
+
+	// Sega CD magic
+	if identifier.ValidateSegaCD(header) {
+		return identifier.ConsoleSegaCD, nil
+	}
+
+	// Genesis magic (check before trying as ISO)
+	if identifier.ValidateGenesis(header) {
+		return identifier.ConsoleGenesis, nil
+	}
+
+	// Try parsing as ISO9660
+	iso, err := iso9660.Open(path)
+	if err == nil {
+		defer iso.Close()
+		return detectConsoleFromISO(iso)
+	}
+
+	return "", identifier.ErrNotSupported{Format: ext}
+}
+
+// detectConsoleFromCue handles CUE sheet detection
+func detectConsoleFromCue(path string) (identifier.Console, error) {
+	cue, err := iso9660.ParseCue(path)
+	if err != nil {
+		return "", err
+	}
+
+	if len(cue.BinFiles) == 0 {
+		return "", identifier.ErrNotSupported{Format: "empty CUE"}
+	}
+
+	// Read header from first BIN file
+	f, err := os.Open(cue.BinFiles[0])
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	header := make([]byte, 0x1000)
+	n, _ := f.Read(header)
+	header = header[:n]
+
+	// Check for Sega consoles first (they have magic words in header)
+	if identifier.ValidateSaturn(header) {
+		return identifier.ConsoleSaturn, nil
+	}
+	if identifier.ValidateSegaCD(header) {
+		return identifier.ConsoleSegaCD, nil
+	}
+
+	// Try as ISO
+	iso, err := iso9660.OpenCue(path)
+	if err != nil {
+		return "", err
+	}
+	defer iso.Close()
+
+	return detectConsoleFromISO(iso)
+}
+
+// detectConsoleFromISO detects console from ISO9660 filesystem
+func detectConsoleFromISO(iso *iso9660.ISO9660) (identifier.Console, error) {
+	files, err := iso.IterFiles(true)
+	if err != nil {
+		return "", err
+	}
+
+	// Build list of root file names (uppercase)
+	var rootFiles []string
+	for _, f := range files {
+		name := strings.ToUpper(filepath.Base(f.Path))
+		// Remove version suffix
+		if idx := strings.Index(name, ";"); idx != -1 {
+			name = name[:idx]
+		}
+		rootFiles = append(rootFiles, name)
+	}
+
+	// Check for PSP
+	for _, f := range rootFiles {
+		if f == "UMD_DATA.BIN" {
+			return identifier.ConsolePSP, nil
+		}
+	}
+
+	// Check for NeoGeoCD
+	for _, f := range rootFiles {
+		if f == "IPL.TXT" {
+			return identifier.ConsoleNeoGeoCD, nil
+		}
+	}
+
+	// Check for PS2/PSX via SYSTEM.CNF
+	for _, f := range rootFiles {
+		if f == "SYSTEM.CNF" {
+			data, err := iso.ReadFileByPath("/SYSTEM.CNF")
+			if err == nil {
+				content := strings.ToUpper(string(data))
+				if strings.Contains(content, "BOOT2") {
+					return identifier.ConsolePS2, nil
+				}
+				if strings.Contains(content, "BOOT") {
+					return identifier.ConsolePSX, nil
+				}
+			}
+		}
+	}
+
+	// Default to PSX for ISO files without clear markers
+	return identifier.ConsolePSX, nil
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+// detectConsoleFromBlockDevice detects the console type from a block device (physical disc).
+func detectConsoleFromBlockDevice(path string) (identifier.Console, error) {
+	// Open the block device
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	// Read header for initial checks (raw disc check for Sega consoles)
+	header := make([]byte, 0x1000)
+	n, err := f.Read(header)
+	if err != nil {
+		return "", err
+	}
+	header = header[:n]
+
+	// Check for Sega consoles (Saturn, SegaCD have magic words at start)
+	if identifier.ValidateSaturn(header) {
+		return identifier.ConsoleSaturn, nil
+	}
+	if identifier.ValidateSegaCD(header) {
+		return identifier.ConsoleSegaCD, nil
+	}
+
+	// Try parsing as ISO9660 disc
+	iso, err := iso9660.Open(path)
+	if err == nil {
+		defer iso.Close()
+		return detectConsoleFromISO(iso)
+	}
+
+	// If ISO parsing fails, try at 2352 byte block offset (Mode2 raw sectors)
+	// This is common for PSX/PS2 discs
+	_, err = f.Seek(16, 0) // Skip sync pattern
+	if err == nil {
+		n, err = f.Read(header)
+		if err == nil && n > 0 {
+			header = header[:n]
+			iso, err = iso9660.Open(path)
+			if err == nil {
+				defer iso.Close()
+				return detectConsoleFromISO(iso)
+			}
+		}
+	}
+
+	return "", identifier.ErrNotSupported{Format: "block device"}
+}
