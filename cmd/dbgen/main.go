@@ -1,3 +1,21 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 // Command dbgen downloads GameDB TSV files and generates the Go game database.
 package main
 
@@ -30,8 +48,8 @@ type gbKey struct {
 
 // snesKey is the lookup key for SNES games
 type snesKey struct {
-	DeveloperID  int
 	InternalName string
+	DeveloperID  int
 	ROMVersion   int
 	Checksum     int
 }
@@ -62,7 +80,7 @@ type Database struct {
 
 func main() {
 	if len(os.Args) != 2 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <output.gob.gz>\n", os.Args[0])
+		_, _ = fmt.Fprintf(os.Stderr, "Usage: %s <output.gob.gz>\n", os.Args[0])
 		os.Exit(1)
 	}
 
@@ -86,9 +104,9 @@ func main() {
 	}
 
 	for _, console := range consoles {
-		fmt.Printf("Loading GameDB-%s...\n", console)
+		_, _ = fmt.Printf("Loading GameDB-%s...\n", console)
 		if err := loadConsole(db, console); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to load %s: %v\n", console, err)
+			_, _ = fmt.Fprintf(os.Stderr, "Warning: failed to load %s: %v\n", console, err)
 		}
 	}
 
@@ -96,25 +114,26 @@ func main() {
 	applyFixups(db)
 
 	// Save database
-	fmt.Printf("Writing database to %s...\n", outputPath)
+	_, _ = fmt.Printf("Writing database to %s...\n", outputPath)
 	if err := saveDatabase(db, outputPath); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Println("Done!")
+	_, _ = fmt.Println("Done!")
 }
 
+//nolint:gocognit,gocyclo,revive,cyclop,funlen // CLI tool complexity and switch statement required
 func loadConsole(db *Database, console string) error {
 	url := fmt.Sprintf(gameDBURLTemplate, console, console)
 
-	resp, err := http.Get(url)
+	resp, err := http.Get(url) //nolint:gosec,noctx // URL is constructed from trusted template
 	if err != nil {
 		return fmt.Errorf("failed to download: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
@@ -189,7 +208,7 @@ func loadConsole(db *Database, console string) error {
 	return scanner.Err()
 }
 
-func addGB(db *Database, id string, metadata map[string]string) {
+func addGB(db *Database, _ string, metadata map[string]string) {
 	// Key is (internal_title, global_checksum)
 	title := metadata["internal_title"]
 	checksumStr := metadata["global_checksum_expected"]
@@ -303,7 +322,7 @@ func addSegaCD(db *Database, id string, metadata map[string]string) {
 	db.SegaCD[id] = metadata
 }
 
-func addSNES(db *Database, id string, metadata map[string]string) {
+func addSNES(db *Database, _ string, metadata map[string]string) {
 	// Key is (developer_id, internal_name_hex, rom_version, checksum)
 	developerIDStr := metadata["developer_ID"]
 	internalName := metadata["internal_title"]
@@ -351,7 +370,7 @@ func buildIDPrefixes(games map[string]map[string]string) []string {
 		prefix string
 		count  int
 	}
-	var prefixes []prefixCount
+	prefixes := make([]prefixCount, 0, len(counts))
 	for p, c := range counts {
 		prefixes = append(prefixes, prefixCount{p, c})
 	}
@@ -373,15 +392,18 @@ func buildIDPrefixes(games map[string]map[string]string) []string {
 }
 
 func saveDatabase(db *Database, path string) error {
-	f, err := os.Create(path)
+	file, err := os.Create(path) //nolint:gosec // Path comes from command line arguments
 	if err != nil {
-		return err
+		return fmt.Errorf("create database file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = file.Close() }()
 
-	gz := gzip.NewWriter(f)
-	defer gz.Close()
+	gz := gzip.NewWriter(file)
+	defer func() { _ = gz.Close() }()
 
 	enc := gob.NewEncoder(gz)
-	return enc.Encode(db)
+	if err := enc.Encode(db); err != nil {
+		return fmt.Errorf("encode database: %w", err)
+	}
+	return nil
 }

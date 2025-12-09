@@ -1,7 +1,26 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 package iso9660
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,35 +34,37 @@ type CueSheet struct {
 
 // ParseCue parses a CUE sheet file and returns the BIN file paths.
 func ParseCue(cuePath string) (*CueSheet, error) {
-	f, err := os.Open(cuePath)
+	cueFile, err := os.Open(cuePath) //nolint:gosec // Path from user input is expected
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open CUE file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = cueFile.Close() }()
 
 	cueDir := filepath.Dir(cuePath)
 	cue := &CueSheet{
 		Path: cuePath,
 	}
 
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(cueFile)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		lineLower := strings.ToLower(line)
 
 		// Look for FILE "filename" BINARY lines
-		if strings.HasPrefix(lineLower, "file") {
-			// Extract filename between quotes
-			parts := strings.Split(line, "\"")
-			if len(parts) >= 2 {
-				binFile := strings.TrimSpace(parts[1])
-				// Make absolute path
-				if !filepath.IsAbs(binFile) {
-					binFile = filepath.Join(cueDir, binFile)
-				}
-				cue.BinFiles = append(cue.BinFiles, binFile)
-			}
+		if !strings.HasPrefix(lineLower, "file") {
+			continue
 		}
+		// Extract filename between quotes
+		parts := strings.Split(line, "\"")
+		if len(parts) < 2 {
+			continue
+		}
+		binFile := strings.TrimSpace(parts[1])
+		// Make absolute path
+		if !filepath.IsAbs(binFile) {
+			binFile = filepath.Join(cueDir, binFile)
+		}
+		cue.BinFiles = append(cue.BinFiles, binFile)
 	}
 
 	if err := scanner.Err(); err != nil {

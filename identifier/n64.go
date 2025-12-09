@@ -1,3 +1,21 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 package identifier
 
 import (
@@ -31,13 +49,13 @@ func NewN64Identifier() *N64Identifier {
 }
 
 // Console returns the console type.
-func (n *N64Identifier) Console() Console {
+func (*N64Identifier) Console() Console {
 	return ConsoleN64
 }
 
-// n64ConvertEndianness converts byte-swapped N64 ROM data to big-endian.
+// n64ByteSwap converts byte-swapped N64 ROM data to big-endian.
 // This handles .v64 format ROMs which are byte-swapped.
-func n64ConvertEndianness(data []byte) []byte {
+func n64ByteSwap(data []byte) []byte {
 	if len(data)%2 != 0 {
 		return data
 	}
@@ -49,36 +67,55 @@ func n64ConvertEndianness(data []byte) []byte {
 	return out
 }
 
+// n64WordSwap swaps every 4 bytes in the data (for .n64 format).
+func n64WordSwap(data []byte) []byte {
+	out := make([]byte, len(data))
+	copy(out, data)
+	for i := 0; i < len(out); i += 4 {
+		out[i], out[i+1], out[i+2], out[i+3] = out[i+3], out[i+2], out[i+1], out[i]
+	}
+	return out
+}
+
+// n64NormalizeEndianness converts an N64 header to big-endian format.
+func n64NormalizeEndianness(header []byte) ([]byte, error) {
+	firstWord := header[n64FirstWordOffset : n64FirstWordOffset+4]
+
+	// Check if already big-endian (.z64 format)
+	if binary.BytesEqual(firstWord, n64FirstWord) {
+		return header, nil
+	}
+
+	// Check if byte-swapped (.v64 format)
+	if binary.BytesEqual(n64ByteSwap(firstWord), n64FirstWord) {
+		return n64ByteSwap(header), nil
+	}
+
+	// Check for word-swapped format (.n64)
+	wordSwapped := []byte{header[3], header[2], header[1], header[0]}
+	if binary.BytesEqual(wordSwapped, n64FirstWord) {
+		return n64WordSwap(header), nil
+	}
+
+	return nil, ErrInvalidFormat{Console: ConsoleN64, Reason: "invalid first word"}
+}
+
 // Identify extracts N64 game information from the given reader.
-func (n *N64Identifier) Identify(r io.ReaderAt, size int64, db Database) (*Result, error) {
+func (*N64Identifier) Identify(reader io.ReaderAt, size int64, db Database) (*Result, error) {
 	if size < n64HeaderSize {
 		return nil, ErrInvalidFormat{Console: ConsoleN64, Reason: "file too small"}
 	}
 
 	// Read header
-	header, err := binary.ReadBytesAt(r, 0, n64HeaderSize)
+	header, err := binary.ReadBytesAt(reader, 0, n64HeaderSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read N64 header: %w", err)
 	}
 
-	// Check first word to determine endianness
-	firstWord := header[n64FirstWordOffset : n64FirstWordOffset+4]
-
-	// Check if it's byte-swapped (.v64 format)
-	if binary.BytesEqual(n64ConvertEndianness(firstWord), n64FirstWord) {
-		header = n64ConvertEndianness(header)
-	} else if !binary.BytesEqual(firstWord, n64FirstWord) {
-		// Also check for word-swapped format (.n64)
-		wordSwapped := []byte{header[3], header[2], header[1], header[0]}
-		if binary.BytesEqual(wordSwapped, n64FirstWord) {
-			// Word-swapped format - swap every 4 bytes
-			for i := 0; i < len(header); i += 4 {
-				header[i], header[i+1], header[i+2], header[i+3] =
-					header[i+3], header[i+2], header[i+1], header[i]
-			}
-		} else {
-			return nil, ErrInvalidFormat{Console: ConsoleN64, Reason: "invalid first word"}
-		}
+	// Convert header to big-endian format if needed
+	header, err = n64NormalizeEndianness(header)
+	if err != nil {
+		return nil, err
 	}
 
 	// Extract cartridge ID (2 bytes at 0x3C)
@@ -105,7 +142,7 @@ func (n *N64Identifier) Identify(r io.ReaderAt, size int64, db Database) (*Resul
 	// Database lookup
 	if db != nil && serial != "" {
 		if entry, found := db.LookupByString(ConsoleN64, serial); found {
-			result.MergeMetadata(entry, false)
+			result.MergeMetadata(entry)
 		}
 	}
 
@@ -131,7 +168,7 @@ func ValidateN64(header []byte) bool {
 	}
 
 	// Check byte-swapped format (.v64)
-	if binary.BytesEqual(n64ConvertEndianness(firstWord), n64FirstWord) {
+	if binary.BytesEqual(n64ByteSwap(firstWord), n64FirstWord) {
 		return true
 	}
 

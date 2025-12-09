@@ -1,6 +1,25 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 package identifier
 
 import (
+	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
@@ -17,18 +36,18 @@ func NewNeoGeoCDIdentifier() *NeoGeoCDIdentifier {
 }
 
 // Console returns the console type.
-func (n *NeoGeoCDIdentifier) Console() Console {
+func (*NeoGeoCDIdentifier) Console() Console {
 	return ConsoleNeoGeoCD
 }
 
 // Identify extracts Neo Geo CD game information from the given reader.
 // For disc-based games, use IdentifyFromPath instead.
-func (n *NeoGeoCDIdentifier) Identify(r io.ReaderAt, size int64, db Database) (*Result, error) {
+func (*NeoGeoCDIdentifier) Identify(_ io.ReaderAt, _ int64, _ Database) (*Result, error) {
 	return nil, ErrNotSupported{Format: "raw reader for NeoGeoCD"}
 }
 
 // IdentifyFromPath identifies a Neo Geo CD game from a file path.
-func (n *NeoGeoCDIdentifier) IdentifyFromPath(path string, db Database) (*Result, error) {
+func (n *NeoGeoCDIdentifier) IdentifyFromPath(path string, database Database) (*Result, error) {
 	var iso interface {
 		GetUUID() string
 		GetVolumeID() string
@@ -38,27 +57,28 @@ func (n *NeoGeoCDIdentifier) IdentifyFromPath(path string, db Database) (*Result
 	ext := strings.ToLower(filepath.Ext(path))
 
 	if ext == ".cue" {
-		i, err := iso9660.OpenCue(path)
+		isoFile, err := iso9660.OpenCue(path)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("open CUE: %w", err)
 		}
-		iso = i
+		iso = isoFile
 	} else {
-		i, err := iso9660.Open(path)
+		isoFile, err := iso9660.Open(path)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("open ISO: %w", err)
 		}
-		iso = i
+		iso = isoFile
 	}
-	defer iso.Close()
+	defer func() { _ = iso.Close() }()
 
-	return n.identifyFromISO(iso, db)
+	return n.identifyFromISO(iso, database)
 }
 
-func (n *NeoGeoCDIdentifier) identifyFromISO(iso interface {
+func (*NeoGeoCDIdentifier) identifyFromISO(iso interface {
 	GetUUID() string
 	GetVolumeID() string
-}, db Database) (*Result, error) {
+}, db Database,
+) (*Result, error) {
 	result := NewResult(ConsoleNeoGeoCD)
 
 	uuid := iso.GetUUID()
@@ -75,13 +95,13 @@ func (n *NeoGeoCDIdentifier) identifyFromISO(iso interface {
 			volumeID string
 		}
 		key := neogeoCDKey{uuid: uuid, volumeID: volumeID}
-		if entry, found := db.Lookup(ConsoleNeoGeoCD, key); found {
-			result.MergeMetadata(entry, false)
-		} else if volumeID != "" {
+		entry, found := db.Lookup(ConsoleNeoGeoCD, key)
+		if !found && volumeID != "" {
 			// Fallback to just volume_ID
-			if entry, found := db.LookupByString(ConsoleNeoGeoCD, volumeID); found {
-				result.MergeMetadata(entry, false)
-			}
+			entry, found = db.LookupByString(ConsoleNeoGeoCD, volumeID)
+		}
+		if found {
+			result.MergeMetadata(entry)
 		}
 	}
 

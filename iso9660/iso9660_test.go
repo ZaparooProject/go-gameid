@@ -1,7 +1,26 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 package iso9660
 
 import (
 	"encoding/binary"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +29,8 @@ import (
 
 // createMinimalISO creates a minimal valid ISO9660 image for testing.
 // Block size is 2048 bytes.
+//
+//nolint:revive,funlen // Test helper function requires many statements for ISO format
 func createMinimalISO(volumeID, systemID, publisherID string) []byte {
 	blockSize := 2048
 
@@ -28,7 +49,7 @@ func createMinimalISO(volumeID, systemID, publisherID string) []byte {
 	data[pvdOffset] = 0x01
 
 	// Standard identifier "CD001"
-	copy(data[pvdOffset+1:], []byte("CD001"))
+	copy(data[pvdOffset+1:], "CD001")
 
 	// Version (1)
 	data[pvdOffset+6] = 0x01
@@ -37,13 +58,13 @@ func createMinimalISO(volumeID, systemID, publisherID string) []byte {
 	if len(systemID) > 32 {
 		systemID = systemID[:32]
 	}
-	copy(data[pvdOffset+8:], []byte(systemID))
+	copy(data[pvdOffset+8:], systemID)
 
 	// Volume identifier (offset 40, 32 bytes)
 	if len(volumeID) > 32 {
 		volumeID = volumeID[:32]
 	}
-	copy(data[pvdOffset+40:], []byte(volumeID))
+	copy(data[pvdOffset+40:], volumeID)
 
 	// Volume space size (offset 80, little-endian + big-endian)
 	binary.LittleEndian.PutUint32(data[pvdOffset+80:], uint32(totalBlocks))
@@ -86,10 +107,10 @@ func createMinimalISO(volumeID, systemID, publisherID string) []byte {
 	if len(publisherID) > 128 {
 		publisherID = publisherID[:128]
 	}
-	copy(data[pvdOffset+318:], []byte(publisherID))
+	copy(data[pvdOffset+318:], publisherID)
 
 	// Volume creation date/time (offset 813, 17 bytes) - used for UUID
-	copy(data[pvdOffset+813:], []byte("2024010112000000"))
+	copy(data[pvdOffset+813:], "2024010112000000")
 
 	// Path table at block 18
 	pathTableOffset := 18 * blockSize
@@ -129,49 +150,55 @@ func createMinimalISO(volumeID, systemID, publisherID string) []byte {
 	return data
 }
 
+//nolint:gosec // G306 permissions ok for tests
 func TestISO9660_Open(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, err := os.MkdirTemp("", "iso9660-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a minimal ISO
 	isoData := createMinimalISO("TESTVOLUME", "TESTSYSTEM", "TESTPUBLISHER")
 	isoPath := filepath.Join(tmpDir, "test.iso")
-	if err := os.WriteFile(isoPath, isoData, 0644); err != nil {
-		t.Fatalf("Failed to write ISO: %v", err)
+	if writeErr := os.WriteFile(isoPath, isoData, 0o644); writeErr != nil {
+		t.Fatalf("Failed to write ISO: %v", writeErr)
 	}
 
 	iso, err := Open(isoPath)
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	defer iso.Close()
+	defer func() { _ = iso.Close() }()
 
 	if iso.BlockSize() != 2048 {
 		t.Errorf("BlockSize() = %d, want 2048", iso.BlockSize())
 	}
 }
 
+//nolint:dupl,gosec // Similar test setup for ISO field retrieval is intentional; G306 permissions ok
 func TestISO9660_GetVolumeID(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, err := os.MkdirTemp("", "iso9660-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	isoData := createMinimalISO("MYVOL", "SYS", "PUB")
 	isoPath := filepath.Join(tmpDir, "test.iso")
-	if err := os.WriteFile(isoPath, isoData, 0644); err != nil {
-		t.Fatalf("Failed to write ISO: %v", err)
+	if writeErr := os.WriteFile(isoPath, isoData, 0o644); writeErr != nil {
+		t.Fatalf("Failed to write ISO: %v", writeErr)
 	}
 
 	iso, err := Open(isoPath)
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	defer iso.Close()
+	defer func() { _ = iso.Close() }()
 
 	volumeID := iso.GetVolumeID()
 	// TrimSpace doesn't remove null bytes, so just check prefix
@@ -180,24 +207,27 @@ func TestISO9660_GetVolumeID(t *testing.T) {
 	}
 }
 
+//nolint:dupl,gosec // Similar test setup for ISO field retrieval is intentional; G306 permissions ok
 func TestISO9660_GetSystemID(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, err := os.MkdirTemp("", "iso9660-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	isoData := createMinimalISO("VOL", "PLAYSTATION", "PUBLISHER")
 	isoPath := filepath.Join(tmpDir, "test.iso")
-	if err := os.WriteFile(isoPath, isoData, 0644); err != nil {
-		t.Fatalf("Failed to write ISO: %v", err)
+	if writeErr := os.WriteFile(isoPath, isoData, 0o644); writeErr != nil {
+		t.Fatalf("Failed to write ISO: %v", writeErr)
 	}
 
 	iso, err := Open(isoPath)
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	defer iso.Close()
+	defer func() { _ = iso.Close() }()
 
 	systemID := iso.GetSystemID()
 	// TrimSpace doesn't remove null bytes, so just check prefix
@@ -207,23 +237,28 @@ func TestISO9660_GetSystemID(t *testing.T) {
 }
 
 func TestISO9660_Open_NonExistent(t *testing.T) {
+	t.Parallel()
+
 	_, err := Open("/nonexistent/path/test.iso")
 	if err == nil {
 		t.Error("Open() should error for non-existent file")
 	}
 }
 
+//nolint:gosec // G306 permissions ok for tests
 func TestISO9660_Open_InvalidSize(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, err := os.MkdirTemp("", "iso9660-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create file with invalid size (not divisible by 2048 or 2352)
 	isoPath := filepath.Join(tmpDir, "invalid.iso")
-	if err := os.WriteFile(isoPath, make([]byte, 1000), 0644); err != nil {
-		t.Fatalf("Failed to write file: %v", err)
+	if writeErr := os.WriteFile(isoPath, make([]byte, 1000), 0o644); writeErr != nil {
+		t.Fatalf("Failed to write file: %v", writeErr)
 	}
 
 	_, err = Open(isoPath)
@@ -232,43 +267,49 @@ func TestISO9660_Open_InvalidSize(t *testing.T) {
 	}
 }
 
+//nolint:gosec // G306 permissions ok for tests
 func TestISO9660_Open_NoPVD(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, err := os.MkdirTemp("", "iso9660-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create file with valid size but no PVD
 	isoPath := filepath.Join(tmpDir, "nopvd.iso")
-	if err := os.WriteFile(isoPath, make([]byte, 2048*20), 0644); err != nil {
-		t.Fatalf("Failed to write file: %v", err)
+	if writeErr := os.WriteFile(isoPath, make([]byte, 2048*20), 0o644); writeErr != nil {
+		t.Fatalf("Failed to write file: %v", writeErr)
 	}
 
 	_, err = Open(isoPath)
-	if err != ErrPVDNotFound {
+	if !errors.Is(err, ErrPVDNotFound) {
 		t.Errorf("Open() error = %v, want %v", err, ErrPVDNotFound)
 	}
 }
 
+//nolint:gosec // G306 permissions ok for tests
 func TestISO9660_Size(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, err := os.MkdirTemp("", "iso9660-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	isoData := createMinimalISO("VOL", "SYS", "PUB")
 	isoPath := filepath.Join(tmpDir, "test.iso")
-	if err := os.WriteFile(isoPath, isoData, 0644); err != nil {
-		t.Fatalf("Failed to write ISO: %v", err)
+	if writeErr := os.WriteFile(isoPath, isoData, 0o644); writeErr != nil {
+		t.Fatalf("Failed to write ISO: %v", writeErr)
 	}
 
 	iso, err := Open(isoPath)
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	defer iso.Close()
+	defer func() { _ = iso.Close() }()
 
 	expectedSize := int64(len(isoData))
 	if iso.Size() != expectedSize {
@@ -276,24 +317,27 @@ func TestISO9660_Size(t *testing.T) {
 	}
 }
 
+//nolint:gosec // G306 permissions ok for tests
 func TestISO9660_IterFiles(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, err := os.MkdirTemp("", "iso9660-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	isoData := createMinimalISO("VOL", "SYS", "PUB")
 	isoPath := filepath.Join(tmpDir, "test.iso")
-	if err := os.WriteFile(isoPath, isoData, 0644); err != nil {
-		t.Fatalf("Failed to write ISO: %v", err)
+	if writeErr := os.WriteFile(isoPath, isoData, 0o644); writeErr != nil {
+		t.Fatalf("Failed to write ISO: %v", writeErr)
 	}
 
 	iso, err := Open(isoPath)
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	defer iso.Close()
+	defer func() { _ = iso.Close() }()
 
 	// Our minimal ISO has no files (just root directory entries)
 	files, err := iso.IterFiles(true)
@@ -306,72 +350,79 @@ func TestISO9660_IterFiles(t *testing.T) {
 }
 
 func TestISO9660_ReadFileByPath_NotFound(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, err := os.MkdirTemp("", "iso9660-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	isoData := createMinimalISO("VOL", "SYS", "PUB")
 	isoPath := filepath.Join(tmpDir, "test.iso")
-	if err := os.WriteFile(isoPath, isoData, 0644); err != nil {
-		t.Fatalf("Failed to write ISO: %v", err)
+	if writeErr := os.WriteFile(isoPath, isoData, 0o600); writeErr != nil {
+		t.Fatalf("Failed to write ISO: %v", writeErr)
 	}
 
 	iso, err := Open(isoPath)
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	defer iso.Close()
+	defer func() { _ = iso.Close() }()
 
 	_, err = iso.ReadFileByPath("/NONEXISTENT.TXT")
-	if err != ErrFileNotFound {
+	if !errors.Is(err, ErrFileNotFound) {
 		t.Errorf("ReadFileByPath() error = %v, want %v", err, ErrFileNotFound)
 	}
 }
 
 func TestISO9660_FileExists(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, err := os.MkdirTemp("", "iso9660-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	isoData := createMinimalISO("VOL", "SYS", "PUB")
 	isoPath := filepath.Join(tmpDir, "test.iso")
-	if err := os.WriteFile(isoPath, isoData, 0644); err != nil {
-		t.Fatalf("Failed to write ISO: %v", err)
+	if writeErr := os.WriteFile(isoPath, isoData, 0o600); writeErr != nil {
+		t.Fatalf("Failed to write ISO: %v", writeErr)
 	}
 
 	iso, err := Open(isoPath)
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	defer iso.Close()
+	defer func() { _ = iso.Close() }()
 
 	if iso.FileExists("/NONEXISTENT.TXT") {
 		t.Error("FileExists() should return false for non-existent file")
 	}
 }
 
+//nolint:dupl // Similar test setup for ISO field retrieval is intentional
 func TestISO9660_GetPublisherID(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, err := os.MkdirTemp("", "iso9660-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	isoData := createMinimalISO("VOL", "SYS", "MY PUBLISHER")
 	isoPath := filepath.Join(tmpDir, "test.iso")
-	if err := os.WriteFile(isoPath, isoData, 0644); err != nil {
-		t.Fatalf("Failed to write ISO: %v", err)
+	if writeErr := os.WriteFile(isoPath, isoData, 0o600); writeErr != nil {
+		t.Fatalf("Failed to write ISO: %v", writeErr)
 	}
 
 	iso, err := Open(isoPath)
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	defer iso.Close()
+	defer func() { _ = iso.Close() }()
 
 	pubID := iso.GetPublisherID()
 	// TrimSpace doesn't remove null bytes, so just check prefix

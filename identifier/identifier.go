@@ -1,3 +1,21 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 // Package identifier provides console-specific game identification logic.
 package identifier
 
@@ -47,23 +65,12 @@ var AllConsoles = []Console{
 
 // Result contains the identification results for a game.
 type Result struct {
-	// ID is the primary game identifier (serial, game code, etc.)
-	ID string
-
-	// Title is the official game title from the database
-	Title string
-
-	// Console is the detected/specified console type
-	Console Console
-
-	// InternalTitle is the title embedded in the ROM/disc
+	Metadata      map[string]string
+	ID            string
+	Title         string
+	Console       Console
 	InternalTitle string
-
-	// Region is the region code if available
-	Region string
-
-	// Metadata contains all extracted and database metadata as key-value pairs
-	Metadata map[string]string
+	Region        string
 }
 
 // NewResult creates a new Result with initialized metadata map.
@@ -103,15 +110,30 @@ func (r *Result) SetMetadata(key, value string) {
 }
 
 // MergeMetadata merges database metadata into the result.
-// If preferDB is true, database values overwrite extracted values.
-func (r *Result) MergeMetadata(dbEntry map[string]string, preferDB bool) {
+// Database values only fill in missing fields.
+func (r *Result) MergeMetadata(dbEntry map[string]string) {
 	for k, v := range dbEntry {
 		if v == "" {
 			continue
 		}
-		if _, exists := r.Metadata[k]; !exists || preferDB {
+		if _, exists := r.Metadata[k]; !exists {
 			r.SetMetadata(k, v)
 		}
+	}
+	// If no title was set, use internal title
+	if r.Title == "" && r.InternalTitle != "" {
+		r.Title = r.InternalTitle
+	}
+}
+
+// MergeMetadataPreferDB merges database metadata into the result.
+// Database values overwrite extracted values.
+func (r *Result) MergeMetadataPreferDB(dbEntry map[string]string) {
+	for k, v := range dbEntry {
+		if v == "" {
+			continue
+		}
+		r.SetMetadata(k, v)
 	}
 	// If no title was set, use internal title
 	if r.Title == "" && r.InternalTitle != "" {
@@ -123,7 +145,7 @@ func (r *Result) MergeMetadata(dbEntry map[string]string, preferDB bool) {
 type Database interface {
 	// Lookup retrieves metadata for a game by console and key.
 	// The key format varies by console (see plan for details).
-	Lookup(console Console, key interface{}) (map[string]string, bool)
+	Lookup(console Console, key any) (map[string]string, bool)
 
 	// LookupByString retrieves metadata using a string key.
 	LookupByString(console Console, key string) (map[string]string, bool)
@@ -188,21 +210,34 @@ type FileInfo struct {
 	Size   int64
 }
 
-// ErrNotSupported is returned when a file format is not supported.
-type ErrNotSupported struct {
+// NotSupportedError is returned when a file format is not supported.
+type NotSupportedError struct {
 	Format string
 }
 
-func (e ErrNotSupported) Error() string {
+func (e NotSupportedError) Error() string {
 	return fmt.Sprintf("format not supported: %s", e.Format)
 }
 
-// ErrInvalidFormat is returned when a file doesn't match the expected format.
-type ErrInvalidFormat struct {
+// InvalidFormatError is returned when a file doesn't match the expected format.
+type InvalidFormatError struct {
 	Console Console
 	Reason  string
 }
 
-func (e ErrInvalidFormat) Error() string {
+func (e InvalidFormatError) Error() string {
 	return fmt.Sprintf("invalid %s format: %s", e.Console, e.Reason)
 }
+
+// Deprecated aliases for backwards compatibility.
+type (
+	// ErrNotSupported is deprecated; use NotSupportedError instead.
+	//
+	//nolint:errname // keeping for backwards compatibility
+	ErrNotSupported = NotSupportedError
+
+	// ErrInvalidFormat is deprecated; use InvalidFormatError instead.
+	//
+	//nolint:errname // keeping for backwards compatibility
+	ErrInvalidFormat = InvalidFormatError
+)

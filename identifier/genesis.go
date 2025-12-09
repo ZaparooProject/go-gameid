@@ -1,3 +1,21 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 package identifier
 
 import (
@@ -67,39 +85,36 @@ func NewGenesisIdentifier() *GenesisIdentifier {
 }
 
 // Console returns the console type.
-func (g *GenesisIdentifier) Console() Console {
+func (*GenesisIdentifier) Console() Console {
 	return ConsoleGenesis
 }
 
 // Identify extracts Genesis game information from the given reader.
-func (g *GenesisIdentifier) Identify(r io.ReaderAt, size int64, db Database) (*Result, error) {
-	// Read enough data to search for magic word and header
+func (*GenesisIdentifier) Identify(reader io.ReaderAt, size int64, db Database) (*Result, error) {
+	data, magicWordInd, err := genesisReadHeader(reader, size)
+	if err != nil {
+		return nil, err
+	}
+
+	return genesisParseHeader(data, magicWordInd, db)
+}
+
+// genesisReadHeader reads the Genesis ROM header and finds the magic word.
+func genesisReadHeader(reader io.ReaderAt, size int64) (data []byte, magicWordIndex int, err error) {
 	searchSize := int64(0x200)
 	if size < searchSize {
 		searchSize = size
 	}
 
-	data := make([]byte, searchSize)
-	if _, err := r.ReadAt(data, 0); err != nil && err != io.EOF {
-		return nil, fmt.Errorf("failed to read Genesis ROM: %w", err)
+	data = make([]byte, searchSize)
+	if _, readErr := reader.ReadAt(data, 0); readErr != nil && readErr != io.EOF {
+		return nil, -1, fmt.Errorf("failed to read Genesis ROM: %w", readErr)
 	}
 
 	// Search for magic word in range 0x100-0x200
-	var magicWordInd int = -1
-	for _, magicWord := range genesisMagicWords {
-		for i := 0x100; i <= 0x200-len(magicWord); i++ {
-			if bin.BytesEqual(data[i:i+len(magicWord)], magicWord) {
-				magicWordInd = i
-				break
-			}
-		}
-		if magicWordInd != -1 {
-			break
-		}
-	}
-
+	magicWordInd := findGenesisMagicWord(data)
 	if magicWordInd == -1 {
-		return nil, ErrInvalidFormat{Console: ConsoleGenesis, Reason: "magic word not found"}
+		return nil, -1, ErrInvalidFormat{Console: ConsoleGenesis, Reason: "magic word not found"}
 	}
 
 	// Need to read more data for full header
@@ -110,13 +125,31 @@ func (g *GenesisIdentifier) Identify(r io.ReaderAt, size int64, db Database) (*R
 
 	if headerEnd > len(data) {
 		fullData := make([]byte, headerEnd)
-		if _, err := r.ReadAt(fullData, 0); err != nil && err != io.EOF {
-			return nil, fmt.Errorf("failed to read Genesis header: %w", err)
+		if _, readErr := reader.ReadAt(fullData, 0); readErr != nil && readErr != io.EOF {
+			return nil, -1, fmt.Errorf("failed to read Genesis header: %w", readErr)
 		}
 		data = fullData
 	}
 
-	// Extract fields relative to magic word position
+	return data, magicWordInd, nil
+}
+
+// findGenesisMagicWord searches for a Genesis magic word in the data.
+func findGenesisMagicWord(data []byte) int {
+	for _, magicWord := range genesisMagicWords {
+		for i := 0x100; i <= 0x200-len(magicWord); i++ {
+			if bin.BytesEqual(data[i:i+len(magicWord)], magicWord) {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// genesisParseHeader parses the Genesis header and returns the result.
+//
+//nolint:funlen,revive // Header parsing requires many field extractions
+func genesisParseHeader(data []byte, magicWordInd int, db Database) (*Result, error) {
 	extractString := func(offset, length int) string {
 		start := magicWordInd + offset
 		end := start + length
@@ -152,53 +185,10 @@ func (g *GenesisIdentifier) Identify(r io.ReaderAt, size int64, db Database) (*R
 		checksum = binary.BigEndian.Uint16(checksumBytes)
 	}
 
-	// Device support
-	deviceSupportBytes := extractBytes(0x090, 0x010)
-	var deviceSupport []string
-	for _, b := range deviceSupportBytes {
-		if b == 0 || b == ' ' {
-			continue
-		}
-		if dev, ok := genesisDeviceSupport[b]; ok {
-			deviceSupport = append(deviceSupport, dev)
-		} else if b >= 0x20 && b <= 0x7E {
-			deviceSupport = append(deviceSupport, string(b))
-		}
-	}
-
-	// ROM/RAM addresses
-	romStartBytes := extractBytes(0x0A0, 4)
-	romEndBytes := extractBytes(0x0A4, 4)
-	ramStartBytes := extractBytes(0x0A8, 4)
-	ramEndBytes := extractBytes(0x0AC, 4)
-
-	var romStart, romEnd, ramStart, ramEnd uint32
-	if len(romStartBytes) == 4 {
-		romStart = binary.BigEndian.Uint32(romStartBytes)
-	}
-	if len(romEndBytes) == 4 {
-		romEnd = binary.BigEndian.Uint32(romEndBytes)
-	}
-	if len(ramStartBytes) == 4 {
-		ramStart = binary.BigEndian.Uint32(ramStartBytes)
-	}
-	if len(ramEndBytes) == 4 {
-		ramEnd = binary.BigEndian.Uint32(ramEndBytes)
-	}
-
-	// Region support
-	regionSupportBytes := extractBytes(0x0F0, 0x003)
-	var regionSupport []string
-	for _, b := range regionSupportBytes {
-		if b == 0 || b == ' ' {
-			continue
-		}
-		if reg, ok := genesisRegionSupport[b]; ok {
-			regionSupport = append(regionSupport, reg)
-		} else if b >= 0x20 && b <= 0x7E {
-			regionSupport = append(regionSupport, string(b))
-		}
-	}
+	deviceSupport := parseGenesisDeviceSupport(extractBytes(0x090, 0x010))
+	addrs := parseGenesisAddresses(extractBytes(0x0A0, 4),
+		extractBytes(0x0A4, 4), extractBytes(0x0A8, 4), extractBytes(0x0AC, 4))
+	regionSupport := parseGenesisRegionSupport(extractBytes(0x0F0, 0x003))
 
 	// Normalize serial for database lookup (remove dashes and spaces)
 	serial := strings.ReplaceAll(gameID, "-", "")
@@ -217,44 +207,122 @@ func (g *GenesisIdentifier) Identify(r io.ReaderAt, size int64, db Database) (*R
 	result.SetMetadata("ID", gameID)
 	result.SetMetadata("revision", revision)
 	result.SetMetadata("checksum", fmt.Sprintf("0x%04x", checksum))
-	result.SetMetadata("rom_start", fmt.Sprintf("0x%08x", romStart))
-	result.SetMetadata("rom_end", fmt.Sprintf("0x%08x", romEnd))
-	result.SetMetadata("ram_start", fmt.Sprintf("0x%08x", ramStart))
-	result.SetMetadata("ram_end", fmt.Sprintf("0x%08x", ramEnd))
+	result.SetMetadata("rom_start", fmt.Sprintf("0x%08x", addrs.romStart))
+	result.SetMetadata("rom_end", fmt.Sprintf("0x%08x", addrs.romEnd))
+	result.SetMetadata("ram_start", fmt.Sprintf("0x%08x", addrs.ramStart))
+	result.SetMetadata("ram_end", fmt.Sprintf("0x%08x", addrs.ramEnd))
 
-	if softwareType != "" {
-		if st, ok := genesisSoftwareTypes[softwareType]; ok {
-			result.SetMetadata("software_type", st)
-		} else {
-			result.SetMetadata("software_type", softwareType)
-		}
-	}
-
-	if len(deviceSupport) > 0 {
-		result.SetMetadata("device_support", strings.Join(deviceSupport, " / "))
-	}
-
-	if len(regionSupport) > 0 {
-		result.SetMetadata("region_support", strings.Join(regionSupport, " / "))
-	}
+	setGenesisSoftwareType(result, softwareType)
+	setGenesisDeviceSupport(result, deviceSupport)
+	setGenesisRegionSupport(result, regionSupport)
 
 	// Database lookup
 	if db != nil && serial != "" {
 		if entry, found := db.LookupByString(ConsoleGenesis, serial); found {
-			result.MergeMetadata(entry, false)
+			result.MergeMetadata(entry)
 		}
 	}
 
 	// If no title from database, use domestic title
-	if result.Title == "" {
-		if titleOverseas != "" {
-			result.Title = titleOverseas
-		} else {
-			result.Title = titleDomestic
-		}
-	}
+	setGenesisFallbackTitle(result, titleOverseas, titleDomestic)
 
 	return result, nil
+}
+
+// setGenesisSoftwareType sets the software type metadata from the raw code.
+func setGenesisSoftwareType(result *Result, softwareType string) {
+	if softwareType == "" {
+		return
+	}
+	if st, ok := genesisSoftwareTypes[softwareType]; ok {
+		result.SetMetadata("software_type", st)
+	} else {
+		result.SetMetadata("software_type", softwareType)
+	}
+}
+
+// setGenesisDeviceSupport sets the device support metadata.
+func setGenesisDeviceSupport(result *Result, deviceSupport []string) {
+	if len(deviceSupport) > 0 {
+		result.SetMetadata("device_support", strings.Join(deviceSupport, " / "))
+	}
+}
+
+// setGenesisRegionSupport sets the region support metadata.
+func setGenesisRegionSupport(result *Result, regionSupport []string) {
+	if len(regionSupport) > 0 {
+		result.SetMetadata("region_support", strings.Join(regionSupport, " / "))
+	}
+}
+
+// setGenesisFallbackTitle sets the title from internal names if not set from database.
+func setGenesisFallbackTitle(result *Result, titleOverseas, titleDomestic string) {
+	if result.Title != "" {
+		return
+	}
+	if titleOverseas != "" {
+		result.Title = titleOverseas
+	} else {
+		result.Title = titleDomestic
+	}
+}
+
+// parseGenesisDeviceSupport parses device support bytes.
+func parseGenesisDeviceSupport(deviceSupportBytes []byte) []string {
+	var deviceSupport []string
+	for _, devByte := range deviceSupportBytes {
+		if devByte == 0 || devByte == ' ' {
+			continue
+		}
+		if dev, ok := genesisDeviceSupport[devByte]; ok {
+			deviceSupport = append(deviceSupport, dev)
+		} else if devByte >= 0x20 && devByte <= 0x7E {
+			deviceSupport = append(deviceSupport, string(devByte))
+		}
+	}
+	return deviceSupport
+}
+
+// genesisAddresses holds ROM and RAM address information.
+type genesisAddresses struct {
+	romStart uint32
+	romEnd   uint32
+	ramStart uint32
+	ramEnd   uint32
+}
+
+// parseGenesisAddresses parses ROM/RAM address bytes.
+func parseGenesisAddresses(romStartBytes, romEndBytes, ramStartBytes, ramEndBytes []byte) genesisAddresses {
+	var addrs genesisAddresses
+	if len(romStartBytes) == 4 {
+		addrs.romStart = binary.BigEndian.Uint32(romStartBytes)
+	}
+	if len(romEndBytes) == 4 {
+		addrs.romEnd = binary.BigEndian.Uint32(romEndBytes)
+	}
+	if len(ramStartBytes) == 4 {
+		addrs.ramStart = binary.BigEndian.Uint32(ramStartBytes)
+	}
+	if len(ramEndBytes) == 4 {
+		addrs.ramEnd = binary.BigEndian.Uint32(ramEndBytes)
+	}
+	return addrs
+}
+
+// parseGenesisRegionSupport parses region support bytes.
+func parseGenesisRegionSupport(regionSupportBytes []byte) []string {
+	var regionSupport []string
+	for _, regByte := range regionSupportBytes {
+		if regByte == 0 || regByte == ' ' {
+			continue
+		}
+		if reg, ok := genesisRegionSupport[regByte]; ok {
+			regionSupport = append(regionSupport, reg)
+		} else if regByte >= 0x20 && regByte <= 0x7E {
+			regionSupport = append(regionSupport, string(regByte))
+		}
+	}
+	return regionSupport
 }
 
 // ValidateGenesis checks if the given data looks like a valid Genesis ROM.

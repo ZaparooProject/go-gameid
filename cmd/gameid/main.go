@@ -1,3 +1,21 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 // Command gameid identifies video game files and returns metadata.
 package main
 
@@ -22,34 +40,35 @@ var (
 
 const appVersion = "0.1.0"
 
+//nolint:gocognit,revive // Main entry point handles all CLI logic
 func main() {
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s -i <file> [options]\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "Identifies video game files and returns metadata.\n\n")
-		fmt.Fprintf(os.Stderr, "Options:\n")
+		_, _ = fmt.Fprint(os.Stderr, "Usage: "+os.Args[0]+" -i <file> [options]\n\n")
+		_, _ = fmt.Fprint(os.Stderr, "Identifies video game files and returns metadata.\n\n")
+		_, _ = fmt.Fprint(os.Stderr, "Options:\n")
 		flag.PrintDefaults()
-		fmt.Fprintf(os.Stderr, "\nExamples:\n")
-		fmt.Fprintf(os.Stderr, "  %s -i game.gba\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  %s -i game.iso -c PSX\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  %s -i game.n64 -db gamedb.gob.gz -json\n", os.Args[0])
+		_, _ = fmt.Fprint(os.Stderr, "\nExamples:\n")
+		_, _ = fmt.Fprint(os.Stderr, "  "+os.Args[0]+" -i game.gba\n")
+		_, _ = fmt.Fprint(os.Stderr, "  "+os.Args[0]+" -i game.iso -c PSX\n")
+		_, _ = fmt.Fprint(os.Stderr, "  "+os.Args[0]+" -i game.n64 -db gamedb.gob.gz -json\n")
 	}
 	flag.Parse()
 
 	if *version {
-		fmt.Printf("gameid version %s\n", appVersion)
+		fmt.Println("gameid version " + appVersion) //nolint:revive // Output for CLI
 		os.Exit(0)
 	}
 
 	if *listConsoles {
-		fmt.Println("Supported consoles:")
+		fmt.Println("Supported consoles:") //nolint:revive // Output for CLI
 		for _, c := range gameid.AllConsoles {
-			fmt.Printf("  %s\n", c)
+			fmt.Println("  " + string(c)) //nolint:revive // Output for CLI
 		}
 		os.Exit(0)
 	}
 
 	if *inputFile == "" {
-		fmt.Fprintf(os.Stderr, "Error: input file required (-i)\n")
+		_, _ = fmt.Fprint(os.Stderr, "Error: input file required (-i)\n")
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -57,10 +76,10 @@ func main() {
 	// Load database if specified
 	var db *gameid.GameDatabase
 	if *dbPath != "" {
-		var err error
-		db, err = gameid.LoadDatabase(*dbPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error loading database: %v\n", err)
+		var loadErr error
+		db, loadErr = gameid.LoadDatabase(*dbPath)
+		if loadErr != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Error loading database: %v\n", loadErr)
 			os.Exit(1)
 		}
 	}
@@ -69,58 +88,63 @@ func main() {
 	var result *gameid.Result
 	var err error
 
+	//nolint:nestif // Console identification requires conditional branching
 	if *console != "" {
 		// Console specified, use it directly
-		c, err := gameid.ParseConsole(*console)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: unknown console '%s'\n", *console)
-			fmt.Fprintf(os.Stderr, "Use -list-consoles to see supported consoles\n")
+		parsedConsole, parseErr := gameid.ParseConsole(*console)
+		if parseErr != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Error: unknown console '%s'\n", *console)
+			_, _ = fmt.Fprintf(os.Stderr, "Use -list-consoles to see supported consoles\n")
 			os.Exit(1)
 		}
-		result, err = gameid.IdentifyWithConsole(*inputFile, c, db)
+		result, err = gameid.IdentifyWithConsole(*inputFile, parsedConsole, db)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error identifying game: %v\n", err)
+			_, _ = fmt.Fprintf(os.Stderr, "Error identifying game: %v\n", err)
 			os.Exit(1)
 		}
 	} else {
 		// Auto-detect console
 		result, err = gameid.Identify(*inputFile, db)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error identifying game: %v\n", err)
+			_, _ = fmt.Fprintf(os.Stderr, "Error identifying game: %v\n", err)
 			os.Exit(1)
 		}
 	}
 
 	// Output results
 	if *jsonOutput {
-		outputJSON(result)
+		if jsonErr := outputJSON(result); jsonErr != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", jsonErr)
+			os.Exit(1)
+		}
 	} else {
 		outputText(result)
 	}
 }
 
-func outputJSON(result *gameid.Result) {
+func outputJSON(result *gameid.Result) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(result); err != nil {
-		fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("encode JSON: %w", err)
 	}
+	return nil
 }
 
+//nolint:gocognit,revive // Output formatting requires many conditional checks
 func outputText(result *gameid.Result) {
-	fmt.Printf("Console: %s\n", result.Console)
+	fmt.Println("Console: " + string(result.Console)) //nolint:revive // Output for CLI
 	if result.ID != "" {
-		fmt.Printf("ID: %s\n", result.ID)
+		fmt.Println("ID: " + result.ID) //nolint:revive // Output for CLI
 	}
 	if result.Title != "" {
-		fmt.Printf("Title: %s\n", result.Title)
+		fmt.Println("Title: " + result.Title) //nolint:revive // Output for CLI
 	}
 	if result.InternalTitle != "" && result.InternalTitle != result.Title {
-		fmt.Printf("Internal Title: %s\n", result.InternalTitle)
+		fmt.Println("Internal Title: " + result.InternalTitle) //nolint:revive // Output for CLI
 	}
 	if result.Region != "" {
-		fmt.Printf("Region: %s\n", result.Region)
+		fmt.Println("Region: " + result.Region) //nolint:revive // Output for CLI
 	}
 
 	// Print other metadata (skip those already printed)
@@ -130,19 +154,21 @@ func outputText(result *gameid.Result) {
 
 	if len(result.Metadata) > 0 {
 		var otherKeys []string
-		for k := range result.Metadata {
-			if !skipKeys[k] {
-				otherKeys = append(otherKeys, k)
+		for key := range result.Metadata {
+			if !skipKeys[key] {
+				otherKeys = append(otherKeys, key)
 			}
 		}
 
 		if len(otherKeys) > 0 {
-			fmt.Println("\nMetadata:")
-			for _, k := range otherKeys {
+			fmt.Println("\nMetadata:") //nolint:revive // Output for CLI
+			for _, key := range otherKeys {
 				// Format key for display
-				displayKey := strings.ReplaceAll(k, "_", " ")
+				displayKey := strings.ReplaceAll(key, "_", " ")
+				//nolint:staticcheck // strings.Title is fine for simple ASCII
 				displayKey = strings.Title(displayKey)
-				fmt.Printf("  %s: %s\n", displayKey, result.Metadata[k])
+				//nolint:revive // Output for CLI
+				fmt.Println("  " + displayKey + ": " + result.Metadata[key])
 			}
 		}
 	}

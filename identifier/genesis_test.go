@@ -1,3 +1,21 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 package identifier
 
 import (
@@ -34,7 +52,7 @@ func createGenesisHeader(systemType, domesticTitle, overseasTitle, gameID string
 	copy(header[magicBase+0x000:], sysBytes)
 
 	// Copyright at magicBase + 0x010 (16 bytes)
-	copy(header[magicBase+0x010:], []byte("(C)SEGA 1994.JAN"))
+	copy(header[magicBase+0x010:], "(C)SEGA 1994.JAN")
 
 	// Domestic title at magicBase + 0x020 (48 bytes)
 	domBytes := []byte(domesticTitle)
@@ -51,7 +69,7 @@ func createGenesisHeader(systemType, domesticTitle, overseasTitle, gameID string
 	copy(header[magicBase+0x050:], overBytes)
 
 	// Software type at magicBase + 0x080 (2 bytes)
-	copy(header[magicBase+0x080:], []byte("GM"))
+	copy(header[magicBase+0x080:], "GM")
 
 	// Game ID at magicBase + 0x082 (9 bytes)
 	idBytes := []byte(gameID)
@@ -61,14 +79,14 @@ func createGenesisHeader(systemType, domesticTitle, overseasTitle, gameID string
 	copy(header[magicBase+0x082:], idBytes)
 
 	// Revision at magicBase + 0x08C (2 bytes)
-	copy(header[magicBase+0x08C:], []byte("00"))
+	copy(header[magicBase+0x08C:], "00")
 
 	// Checksum at magicBase + 0x08E (2 bytes)
 	header[magicBase+0x08E] = 0x00
 	header[magicBase+0x08F] = 0x00
 
 	// Device support at magicBase + 0x090 (16 bytes)
-	copy(header[magicBase+0x090:], []byte("J               "))
+	copy(header[magicBase+0x090:], "J               ")
 
 	// ROM start at magicBase + 0x0A0 (4 bytes)
 	header[magicBase+0x0A0] = 0x00
@@ -83,29 +101,32 @@ func createGenesisHeader(systemType, domesticTitle, overseasTitle, gameID string
 	header[magicBase+0x0A7] = 0xFF
 
 	// Region support at magicBase + 0x0F0 (3 bytes)
-	copy(header[magicBase+0x0F0:], []byte("JUE"))
+	copy(header[magicBase+0x0F0:], "JUE")
 
 	return header
 }
 
+//nolint:dupl // Similar test structure is intentional for table-driven tests
 func TestGenesisIdentifier_Identify(t *testing.T) {
-	id := NewGenesisIdentifier()
+	t.Parallel()
+
+	identifier := NewGenesisIdentifier()
 
 	tests := []struct {
 		name              string
 		systemType        string
 		domesticTitle     string
 		overseasTitle     string
-		gameID            string // The 9-byte game ID field
-		wantInternalTitle string // InternalTitle = domesticTitle
-		wantTitle         string // Title = overseasTitle (fallback)
+		gameID            string
+		wantInternalTitle string
+		wantTitle         string
 	}{
 		{
 			name:              "Sonic the Hedgehog",
 			systemType:        "SEGA GENESIS    ",
 			domesticTitle:     "SONIC THE HEDGEHOG",
 			overseasTitle:     "SONIC THE HEDGEHOG",
-			gameID:            "00001009-", // 9 chars for gameID
+			gameID:            "00001009-",
 			wantInternalTitle: "SONIC THE HEDGEHOG",
 			wantTitle:         "SONIC THE HEDGEHOG",
 		},
@@ -120,22 +141,29 @@ func TestGenesisIdentifier_Identify(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			header := createGenesisHeader(tt.systemType, tt.domesticTitle, tt.overseasTitle, tt.gameID)
-			r := bytes.NewReader(header)
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-			result, err := id.Identify(r, int64(len(header)), nil)
+			header := createGenesisHeader(
+				testCase.systemType,
+				testCase.domesticTitle,
+				testCase.overseasTitle,
+				testCase.gameID,
+			)
+			reader := bytes.NewReader(header)
+
+			result, err := identifier.Identify(reader, int64(len(header)), nil)
 			if err != nil {
 				t.Fatalf("Identify() error = %v", err)
 			}
 
-			if result.InternalTitle != tt.wantInternalTitle {
-				t.Errorf("InternalTitle = %q, want %q", result.InternalTitle, tt.wantInternalTitle)
+			if result.InternalTitle != testCase.wantInternalTitle {
+				t.Errorf("InternalTitle = %q, want %q", result.InternalTitle, testCase.wantInternalTitle)
 			}
 
-			if result.Title != tt.wantTitle {
-				t.Errorf("Title = %q, want %q", result.Title, tt.wantTitle)
+			if result.Title != testCase.wantTitle {
+				t.Errorf("Title = %q, want %q", result.Title, testCase.wantTitle)
 			}
 
 			if result.Console != ConsoleGenesis {
@@ -146,14 +174,16 @@ func TestGenesisIdentifier_Identify(t *testing.T) {
 }
 
 func TestGenesisIdentifier_InvalidMagic(t *testing.T) {
-	id := NewGenesisIdentifier()
+	t.Parallel()
+
+	identifier := NewGenesisIdentifier()
 
 	// Create header without SEGA magic
 	header := make([]byte, 0x200)
-	copy(header[0x100:], []byte("NOT A SEGA GAME"))
+	copy(header[0x100:], "NOT A SEGA GAME")
 
-	r := bytes.NewReader(header)
-	_, err := id.Identify(r, int64(len(header)), nil)
+	reader := bytes.NewReader(header)
+	_, err := identifier.Identify(reader, int64(len(header)), nil)
 
 	if err == nil {
 		t.Error("expected error for invalid magic, got nil")
@@ -161,6 +191,8 @@ func TestGenesisIdentifier_InvalidMagic(t *testing.T) {
 }
 
 func TestValidateGenesis(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name   string
 		header []byte
@@ -183,11 +215,13 @@ func TestValidateGenesis(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ValidateGenesis(tt.header)
-			if got != tt.want {
-				t.Errorf("ValidateGenesis() = %v, want %v", got, tt.want)
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := ValidateGenesis(testCase.header)
+			if got != testCase.want {
+				t.Errorf("ValidateGenesis() = %v, want %v", got, testCase.want)
 			}
 		})
 	}

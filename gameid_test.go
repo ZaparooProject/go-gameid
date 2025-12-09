@@ -1,3 +1,21 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 package gameid
 
 import (
@@ -9,6 +27,8 @@ import (
 )
 
 func TestParseConsole(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		input   string
@@ -49,6 +69,8 @@ func TestParseConsole(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			got, err := ParseConsole(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseConsole(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
@@ -62,6 +84,8 @@ func TestParseConsole(t *testing.T) {
 }
 
 func TestSupportedConsoles(t *testing.T) {
+	t.Parallel()
+
 	consoles := SupportedConsoles()
 	if len(consoles) != len(AllConsoles) {
 		t.Errorf("SupportedConsoles() returned %d consoles, want %d", len(consoles), len(AllConsoles))
@@ -83,6 +107,8 @@ func TestSupportedConsoles(t *testing.T) {
 }
 
 func TestIsDiscBased(t *testing.T) {
+	t.Parallel()
+
 	discBased := []Console{ConsoleGC, ConsoleNeoGeoCD, ConsolePSP, ConsolePSX, ConsolePS2, ConsoleSaturn, ConsoleSegaCD}
 	cartBased := []Console{ConsoleGB, ConsoleGBC, ConsoleGBA, ConsoleGenesis, ConsoleN64, ConsoleNES, ConsoleSNES}
 
@@ -132,31 +158,33 @@ func createTestGBAFile(t *testing.T, tmpDir string) string {
 	copy(header[0x04:], nintendoLogo)
 
 	// Internal title (12 bytes at 0xA0)
-	copy(header[0xA0:], []byte("TESTGAME    "))
+	copy(header[0xA0:], "TESTGAME    ")
 
 	// Game code (4 bytes at 0xAC)
-	copy(header[0xAC:], []byte("ATST"))
+	copy(header[0xAC:], "ATST")
 
 	// Maker code (2 bytes at 0xB0)
-	copy(header[0xB0:], []byte("01"))
+	copy(header[0xB0:], "01")
 
 	// Fixed value (0xB2)
 	header[0xB2] = 0x96
 
 	path := filepath.Join(tmpDir, "test.gba")
-	if err := os.WriteFile(path, header, 0644); err != nil {
+	if err := os.WriteFile(path, header, 0o600); err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 	return path
 }
 
 func TestIdentifyWithConsole(t *testing.T) {
+	t.Parallel()
+
 	// Create temp directory
 	tmpDir, err := os.MkdirTemp("", "gameid-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a GBA test file
 	gbaPath := createTestGBAFile(t, tmpDir)
@@ -181,12 +209,14 @@ func TestIdentifyWithConsole(t *testing.T) {
 }
 
 func TestIdentify(t *testing.T) {
+	t.Parallel()
+
 	// Create temp directory
 	tmpDir, err := os.MkdirTemp("", "gameid-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a GBA test file
 	gbaPath := createTestGBAFile(t, tmpDir)
@@ -207,6 +237,8 @@ func TestIdentify(t *testing.T) {
 }
 
 func TestIdentify_NonExistent(t *testing.T) {
+	t.Parallel()
+
 	_, err := Identify("/nonexistent/path/game.gba", nil)
 	if err == nil {
 		t.Error("Identify() should error for non-existent file")
@@ -214,17 +246,19 @@ func TestIdentify_NonExistent(t *testing.T) {
 }
 
 func TestIdentify_UnsupportedFormat(t *testing.T) {
+	t.Parallel()
+
 	// Create temp directory
 	tmpDir, err := os.MkdirTemp("", "gameid-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a file with unsupported extension
 	path := filepath.Join(tmpDir, "game.xyz")
-	if err := os.WriteFile(path, []byte("test"), 0644); err != nil {
-		t.Fatalf("Failed to write test file: %v", err)
+	if writeErr := os.WriteFile(path, []byte("test"), 0o600); writeErr != nil {
+		t.Fatalf("Failed to write test file: %v", writeErr)
 	}
 
 	_, err = Identify(path, nil)
@@ -234,15 +268,17 @@ func TestIdentify_UnsupportedFormat(t *testing.T) {
 }
 
 func TestIsBlockDevice(t *testing.T) {
+	t.Parallel()
+
 	// Regular files should not be detected as block devices
 	tmpDir, err := os.MkdirTemp("", "gameid-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	regularFile := filepath.Join(tmpDir, "test.iso")
-	if err := os.WriteFile(regularFile, []byte("test"), 0644); err != nil {
+	if err := os.WriteFile(regularFile, []byte("test"), 0o600); err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 

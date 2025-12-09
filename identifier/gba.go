@@ -1,3 +1,21 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 package identifier
 
 import (
@@ -49,28 +67,26 @@ func NewGBAIdentifier() *GBAIdentifier {
 }
 
 // Console returns the console type.
-func (g *GBAIdentifier) Console() Console {
+func (*GBAIdentifier) Console() Console {
 	return ConsoleGBA
 }
 
 // Identify extracts GBA game information from the given reader.
-func (g *GBAIdentifier) Identify(r io.ReaderAt, size int64, db Database) (*Result, error) {
+func (*GBAIdentifier) Identify(reader io.ReaderAt, size int64, db Database) (*Result, error) {
 	if size < gbaHeaderSize {
 		return nil, ErrInvalidFormat{Console: ConsoleGBA, Reason: "file too small"}
 	}
 
 	// Read header
-	header, err := binary.ReadBytesAt(r, 0, gbaHeaderSize)
+	header, err := binary.ReadBytesAt(reader, 0, gbaHeaderSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read GBA header: %w", err)
 	}
 
 	// Validate Nintendo logo (optional - some homebrew may not have it)
-	logo := header[gbaNintendoLogoOffset : gbaNintendoLogoOffset+gbaNintendoLogoSize]
-	if !binary.BytesEqual(logo, gbaNintendoLogo) {
-		// Not a fatal error, just note it
-		// Some valid GBA ROMs may have modified logos
-	}
+	// Not a fatal error if invalid, just note it - some valid GBA ROMs may have modified logos
+	// logo := header[gbaNintendoLogoOffset : gbaNintendoLogoOffset+gbaNintendoLogoSize]
+	// _ = binary.BytesEqual(logo, gbaNintendoLogo)
 
 	// Extract title (12 bytes at 0xA0)
 	title := binary.ExtractPrintable(header[gbaTitleOffset : gbaTitleOffset+gbaTitleSize])
@@ -99,7 +115,7 @@ func (g *GBAIdentifier) Identify(r io.ReaderAt, size int64, db Database) (*Resul
 	// Database lookup
 	if db != nil && gameCode != "" {
 		if entry, found := db.LookupByString(ConsoleGBA, gameCode); found {
-			result.MergeMetadata(entry, false)
+			result.MergeMetadata(entry)
 		}
 	}
 

@@ -1,3 +1,21 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 package gameid
 
 import (
@@ -11,7 +29,10 @@ import (
 	"github.com/ZaparooProject/go-gameid/identifier"
 )
 
+//nolint:gocyclo,revive,cyclop // Verifying all database fields are initialized
 func TestNewDatabase(t *testing.T) {
+	t.Parallel()
+
 	db := NewDatabase()
 
 	if db == nil {
@@ -64,11 +85,13 @@ func TestNewDatabase(t *testing.T) {
 }
 
 func TestDatabase_SaveAndLoad(t *testing.T) {
+	t.Parallel()
+
 	tmpDir, err := os.MkdirTemp("", "gameid-db-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a database with test data
 	db := NewDatabase()
@@ -80,19 +103,19 @@ func TestDatabase_SaveAndLoad(t *testing.T) {
 
 	// Save database
 	dbPath := filepath.Join(tmpDir, "test.gob.gz")
-	if err := db.SaveDatabase(dbPath); err != nil {
-		t.Fatalf("SaveDatabase() error = %v", err)
+	if saveErr := db.SaveDatabase(dbPath); saveErr != nil {
+		t.Fatalf("SaveDatabase() error = %v", saveErr)
 	}
 
 	// Verify file exists
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+	if _, statErr := os.Stat(dbPath); os.IsNotExist(statErr) {
 		t.Fatal("Database file was not created")
 	}
 
 	// Load database
-	loadedDB, err := LoadDatabase(dbPath)
-	if err != nil {
-		t.Fatalf("LoadDatabase() error = %v", err)
+	loadedDB, loadErr := LoadDatabase(dbPath)
+	if loadErr != nil {
+		t.Fatalf("LoadDatabase() error = %v", loadErr)
 	}
 
 	// Verify data
@@ -121,6 +144,8 @@ func TestDatabase_SaveAndLoad(t *testing.T) {
 }
 
 func TestDatabase_LookupByString(t *testing.T) {
+	t.Parallel()
+
 	db := NewDatabase()
 	db.GBA["BPEE"] = map[string]string{"title": "Pokemon Emerald"}
 	db.GC["GALE"] = map[string]string{"title": "Super Smash Bros Melee"}
@@ -151,6 +176,8 @@ func TestDatabase_LookupByString(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(string(tt.console)+"/"+tt.key, func(t *testing.T) {
+			t.Parallel()
+
 			entry, found := db.LookupByString(tt.console, tt.key)
 			if found != tt.wantFind {
 				t.Errorf("LookupByString(%v, %q) found = %v, want %v", tt.console, tt.key, found, tt.wantFind)
@@ -163,6 +190,8 @@ func TestDatabase_LookupByString(t *testing.T) {
 }
 
 func TestDatabase_Lookup_NES(t *testing.T) {
+	t.Parallel()
+
 	db := NewDatabase()
 	db.NES[0xDEADBEEF] = map[string]string{"title": "Test NES Game"}
 
@@ -182,6 +211,8 @@ func TestDatabase_Lookup_NES(t *testing.T) {
 }
 
 func TestDatabase_GetIDPrefixes(t *testing.T) {
+	t.Parallel()
+
 	db := NewDatabase()
 	db.IDPrefixes[identifier.ConsolePSX] = []string{"SLUS", "SCUS"}
 	db.IDPrefixes[identifier.ConsolePS2] = []string{"SLUS", "SCUS", "SLPM"}
@@ -204,6 +235,8 @@ func TestDatabase_GetIDPrefixes(t *testing.T) {
 }
 
 func TestLoadDatabase_NonExistent(t *testing.T) {
+	t.Parallel()
+
 	_, err := LoadDatabase("/nonexistent/path/db.gob.gz")
 	if err == nil {
 		t.Error("LoadDatabase() should error for non-existent file")
@@ -211,6 +244,8 @@ func TestLoadDatabase_NonExistent(t *testing.T) {
 }
 
 func TestLoadDatabaseFromReader(t *testing.T) {
+	t.Parallel()
+
 	// Create a database and encode it to a buffer
 	db := NewDatabase()
 	db.GBA["TEST"] = map[string]string{"title": "Test Game"}
@@ -221,7 +256,9 @@ func TestLoadDatabaseFromReader(t *testing.T) {
 	if err := enc.Encode(db); err != nil {
 		t.Fatalf("Failed to encode database: %v", err)
 	}
-	gz.Close()
+	if err := gz.Close(); err != nil {
+		t.Fatalf("Failed to close gzip writer: %v", err)
+	}
 
 	// Load from buffer
 	loadedDB, err := LoadDatabaseFromReader(&buf)
@@ -237,6 +274,8 @@ func TestLoadDatabaseFromReader(t *testing.T) {
 }
 
 func TestLoadDatabaseFromReader_InvalidGzip(t *testing.T) {
+	t.Parallel()
+
 	// Not valid gzip data
 	buf := bytes.NewReader([]byte("not gzip data"))
 	_, err := LoadDatabaseFromReader(buf)
@@ -245,7 +284,8 @@ func TestLoadDatabaseFromReader_InvalidGzip(t *testing.T) {
 	}
 }
 
-func TestDatabase_ImplementsInterface(t *testing.T) {
+//nolint:paralleltest // Interface verification test doesn't need parallel
+func TestDatabase_ImplementsInterface(_ *testing.T) {
 	// This test just verifies the interface is implemented correctly
 	// The actual implementation is tested in other tests
 	var _ identifier.Database = (*GameDatabase)(nil)

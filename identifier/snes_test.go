@@ -1,3 +1,21 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 package identifier
 
 import (
@@ -7,6 +25,8 @@ import (
 
 // createSNESHeader creates a minimal valid SNES ROM with LoROM header for testing.
 // The header is at 0x7FC0 for LoROM.
+//
+//nolint:dupl // Similar header creation function is intentional for test clarity
 func createSNESHeader(internalName string, developerID, romVersion byte, checksum uint16) []byte {
 	// Need at least 0x8000 bytes for LoROM header
 	rom := make([]byte, 0x8000)
@@ -45,6 +65,8 @@ func createSNESHeader(internalName string, developerID, romVersion byte, checksu
 }
 
 // createSNESHeaderHiROM creates a SNES ROM with HiROM header.
+//
+//nolint:dupl // Similar header creation function is intentional for test clarity
 func createSNESHeaderHiROM(internalName string, developerID, romVersion byte, checksum uint16) []byte {
 	// Need at least 0x10000 bytes for HiROM header at 0xFFC0
 	rom := make([]byte, 0x10000)
@@ -83,14 +105,16 @@ func createSNESHeaderHiROM(internalName string, developerID, romVersion byte, ch
 }
 
 func TestSNESIdentifier_Identify(t *testing.T) {
-	id := NewSNESIdentifier()
+	t.Parallel()
+
+	identifier := NewSNESIdentifier()
 
 	tests := []struct {
 		name         string
-		rom          []byte
 		wantTitle    string
 		wantROMType  string
 		wantFastSlow string
+		rom          []byte
 	}{
 		{
 			name:         "LoROM Game",
@@ -108,45 +132,57 @@ func TestSNESIdentifier_Identify(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r := bytes.NewReader(tt.rom)
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-			result, err := id.Identify(r, int64(len(tt.rom)), nil)
+			reader := bytes.NewReader(testCase.rom)
+
+			result, err := identifier.Identify(reader, int64(len(testCase.rom)), nil)
 			if err != nil {
 				t.Fatalf("Identify() error = %v", err)
 			}
 
-			if result.InternalTitle != tt.wantTitle {
-				t.Errorf("InternalTitle = %q, want %q", result.InternalTitle, tt.wantTitle)
-			}
-
-			if result.Console != ConsoleSNES {
-				t.Errorf("Console = %v, want %v", result.Console, ConsoleSNES)
-			}
-
-			if romType := result.Metadata["rom_type"]; romType != tt.wantROMType {
-				t.Errorf("rom_type = %q, want %q", romType, tt.wantROMType)
-			}
-
-			if fastSlow := result.Metadata["fast_slow_rom"]; fastSlow != tt.wantFastSlow {
-				t.Errorf("fast_slow_rom = %q, want %q", fastSlow, tt.wantFastSlow)
-			}
+			verifySNESResult(t, result, testCase.wantTitle, testCase.wantROMType, testCase.wantFastSlow)
 		})
 	}
 }
 
+func verifySNESResult(t *testing.T, result *Result, wantTitle, wantROMType, wantFastSlow string) {
+	t.Helper()
+
+	if result.InternalTitle != wantTitle {
+		t.Errorf("InternalTitle = %q, want %q", result.InternalTitle, wantTitle)
+	}
+
+	if result.Console != ConsoleSNES {
+		t.Errorf("Console = %v, want %v", result.Console, ConsoleSNES)
+	}
+
+	if romType := result.Metadata["rom_type"]; romType != wantROMType {
+		t.Errorf("rom_type = %q, want %q", romType, wantROMType)
+	}
+
+	if fastSlow := result.Metadata["fast_slow_rom"]; fastSlow != wantFastSlow {
+		t.Errorf("fast_slow_rom = %q, want %q", fastSlow, wantFastSlow)
+	}
+}
+
 func TestSNESIdentifier_SMCHeader(t *testing.T) {
-	id := NewSNESIdentifier()
+	t.Parallel()
+
+	identifier := NewSNESIdentifier()
 
 	// Create a ROM with 512-byte SMC header
 	baseROM := createSNESHeader("SMC TEST GAME", 0x02, 0, 0x5678)
 	smcHeader := make([]byte, 512)
-	romWithSMC := append(smcHeader, baseROM...)
+	romWithSMC := make([]byte, 0, len(smcHeader)+len(baseROM))
+	romWithSMC = append(romWithSMC, smcHeader...)
+	romWithSMC = append(romWithSMC, baseROM...)
 
-	r := bytes.NewReader(romWithSMC)
+	reader := bytes.NewReader(romWithSMC)
 
-	result, err := id.Identify(r, int64(len(romWithSMC)), nil)
+	result, err := identifier.Identify(reader, int64(len(romWithSMC)), nil)
 	if err != nil {
 		t.Fatalf("Identify() error = %v", err)
 	}
@@ -157,23 +193,27 @@ func TestSNESIdentifier_SMCHeader(t *testing.T) {
 }
 
 func TestSNESIdentifier_InvalidChecksum(t *testing.T) {
-	id := NewSNESIdentifier()
+	t.Parallel()
+
+	identifier := NewSNESIdentifier()
 
 	// Create a ROM with invalid checksum (doesn't sum to 0xFFFF)
 	rom := make([]byte, 0x8000)
 	headerStart := snesLoROMHeaderStart
-	copy(rom[headerStart:], []byte("INVALID"))
+	copy(rom[headerStart:], "INVALID")
 	// Don't set valid checksum+complement
 
-	r := bytes.NewReader(rom)
+	reader := bytes.NewReader(rom)
 
-	_, err := id.Identify(r, int64(len(rom)), nil)
+	_, err := identifier.Identify(reader, int64(len(rom)), nil)
 	if err == nil {
 		t.Error("expected error for invalid checksum, got nil")
 	}
 }
 
 func TestValidateSNES(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		rom  []byte
@@ -201,11 +241,13 @@ func TestValidateSNES(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ValidateSNES(tt.rom)
-			if got != tt.want {
-				t.Errorf("ValidateSNES() = %v, want %v", got, tt.want)
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := ValidateSNES(testCase.rom)
+			if got != testCase.want {
+				t.Errorf("ValidateSNES() = %v, want %v", got, testCase.want)
 			}
 		})
 	}

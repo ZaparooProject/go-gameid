@@ -1,3 +1,21 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 package gameid
 
 import (
@@ -8,19 +26,22 @@ import (
 	"github.com/ZaparooProject/go-gameid/identifier"
 )
 
+//nolint:funlen // Table-driven test with many test cases
 func TestDetectConsole(t *testing.T) {
+	t.Parallel()
+
 	// Create temp directory for test files
 	tmpDir, err := os.MkdirTemp("", "gameid-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	t.Cleanup(func() { _ = os.RemoveAll(tmpDir) })
 
 	tests := []struct {
 		name     string
 		filename string
-		content  []byte
 		want     identifier.Console
+		content  []byte
 		wantErr  bool
 	}{
 		{
@@ -99,9 +120,11 @@ func TestDetectConsole(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			// Create test file
 			path := filepath.Join(tmpDir, tt.filename)
-			if err := os.WriteFile(path, tt.content, 0644); err != nil {
+			if err := os.WriteFile(path, tt.content, 0o600); err != nil {
 				t.Fatalf("Failed to write test file: %v", err)
 			}
 
@@ -118,22 +141,24 @@ func TestDetectConsole(t *testing.T) {
 }
 
 func TestDetectConsole_GzSuffix(t *testing.T) {
+	t.Parallel()
+
 	// Create temp directory
 	tmpDir, err := os.MkdirTemp("", "gameid-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Create a .gba.gz file
 	path := filepath.Join(tmpDir, "game.gba.gz")
-	if err := os.WriteFile(path, make([]byte, 0x100), 0644); err != nil {
-		t.Fatalf("Failed to write test file: %v", err)
+	if writeErr := os.WriteFile(path, make([]byte, 0x100), 0o600); writeErr != nil {
+		t.Fatalf("Failed to write test file: %v", writeErr)
 	}
 
-	got, err := DetectConsole(path)
-	if err != nil {
-		t.Errorf("DetectConsole() error = %v", err)
+	got, detectErr := DetectConsole(path)
+	if detectErr != nil {
+		t.Errorf("DetectConsole() error = %v", detectErr)
 		return
 	}
 	if got != identifier.ConsoleGBA {
@@ -142,6 +167,8 @@ func TestDetectConsole_GzSuffix(t *testing.T) {
 }
 
 func TestDetectConsole_NonExistent(t *testing.T) {
+	t.Parallel()
+
 	_, err := DetectConsole("/nonexistent/path/game.gba")
 	if err == nil {
 		t.Error("DetectConsole() should error for non-existent file")

@@ -1,3 +1,21 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 package identifier
 
 import (
@@ -16,15 +34,15 @@ func NewNESIdentifier() *NESIdentifier {
 }
 
 // Console returns the console type.
-func (n *NESIdentifier) Console() Console {
+func (*NESIdentifier) Console() Console {
 	return ConsoleNES
 }
 
 // Identify extracts NES game information from the given reader.
-func (n *NESIdentifier) Identify(r io.ReaderAt, size int64, db Database) (*Result, error) {
+func (*NESIdentifier) Identify(reader io.ReaderAt, size int64, db Database) (*Result, error) {
 	// Read entire file for CRC32 calculation
 	data := make([]byte, size)
-	if _, err := r.ReadAt(data, 0); err != nil && err != io.EOF {
+	if _, err := reader.ReadAt(data, 0); err != nil && err != io.EOF {
 		return nil, fmt.Errorf("failed to read NES ROM: %w", err)
 	}
 
@@ -37,7 +55,7 @@ func (n *NESIdentifier) Identify(r io.ReaderAt, size int64, db Database) (*Resul
 	// Database lookup uses CRC32 as integer key
 	if db != nil {
 		if entry, found := db.Lookup(ConsoleNES, int(checksum)); found {
-			result.MergeMetadata(entry, false)
+			result.MergeMetadata(entry)
 		}
 	}
 

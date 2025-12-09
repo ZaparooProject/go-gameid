@@ -1,3 +1,21 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 package identifier
 
 import (
@@ -32,28 +50,24 @@ func NewSNESIdentifier() *SNESIdentifier {
 }
 
 // Console returns the console type.
-func (s *SNESIdentifier) Console() Console {
+func (*SNESIdentifier) Console() Console {
 	return ConsoleSNES
 }
 
-// Identify extracts SNES game information from the given reader.
-func (s *SNESIdentifier) Identify(r io.ReaderAt, size int64, db Database) (*Result, error) {
-	// Read entire ROM for analysis
-	data := make([]byte, size)
-	if _, err := r.ReadAt(data, 0); err != nil && err != io.EOF {
-		return nil, fmt.Errorf("failed to read SNES ROM: %w", err)
-	}
+// snesHeaderInfo contains parsed SNES header information.
+type snesHeaderInfo struct {
+	internalNameHex string
+	internalName    []byte
+	headerStart     int
+	checksum        uint16
+	mapMode         byte
+	romType         byte
+	developerID     byte
+	romVersion      byte
+}
 
-	// Check for and strip 512-byte SMC header
-	if len(data)%1024 == 512 {
-		data = data[512:]
-	}
-
-	// Find valid header by checking checksum complement
-	var headerStart int
-	var checksum uint16
-	var foundHeader bool
-
+// snesFindHeader locates and validates the SNES header in ROM data.
+func snesFindHeader(data []byte) (snesHeaderInfo, error) {
 	for _, start := range []int{snesLoROMHeaderStart, snesHiROMHeaderStart} {
 		if start+snesHeaderSize > len(data) {
 			continue
@@ -65,39 +79,42 @@ func (s *SNESIdentifier) Identify(r io.ReaderAt, size int64, db Database) (*Resu
 
 		// Valid header if checksum + complement = 0xFFFF
 		if cs+csc == 0xFFFF {
-			headerStart = start
-			checksum = cs
-			foundHeader = true
-			break
+			header := data[start:]
+			internalName := header[snesInternalNameOffset : snesInternalNameOffset+snesInternalNameSize]
+			return snesHeaderInfo{
+				headerStart:     start,
+				checksum:        cs,
+				internalName:    internalName,
+				internalNameHex: snesFormatInternalNameHex(internalName),
+				mapMode:         header[snesMapModeOffset],
+				romType:         header[snesROMTypeOffset],
+				developerID:     header[snesDeveloperIDOffset],
+				romVersion:      header[snesROMVersionOffset],
+			}, nil
 		}
 	}
+	return snesHeaderInfo{}, ErrInvalidFormat{Console: ConsoleSNES, Reason: "no valid header found"}
+}
 
-	if !foundHeader {
-		return nil, ErrInvalidFormat{Console: ConsoleSNES, Reason: "no valid header found"}
-	}
-
-	header := data[headerStart:]
-
-	// Extract internal name (21 bytes)
-	internalName := header[snesInternalNameOffset : snesInternalNameOffset+snesInternalNameSize]
-	internalNameHex := "0x"
+// snesFormatInternalNameHex converts internal name bytes to hex string.
+func snesFormatInternalNameHex(internalName []byte) string {
+	result := "0x"
 	for _, b := range internalName {
-		internalNameHex += fmt.Sprintf("%02x", b)
+		result += fmt.Sprintf("%02x", b)
 	}
+	return result
+}
 
-	// Extract other fields
-	mapMode := header[snesMapModeOffset]
-	romType := header[snesROMTypeOffset]
-	developerID := header[snesDeveloperIDOffset]
-	romVersion := header[snesROMVersionOffset]
-
-	// Determine FastROM/SlowROM
-	fastSlowROM := "SlowROM"
+// snesGetFastSlowROM determines if ROM is FastROM or SlowROM.
+func snesGetFastSlowROM(mapMode byte) string {
 	if (mapMode & 0x10) != 0 {
-		fastSlowROM = "FastROM"
+		return "FastROM"
 	}
+	return "SlowROM"
+}
 
-	// Determine ROM type (LoROM/HiROM/ExLoROM/ExHiROM)
+// snesGetROMTypeStr determines ROM mapping type string.
+func snesGetROMTypeStr(mapMode byte) string {
 	romTypeStr := "LoROM"
 	if (mapMode & 0x01) != 0 {
 		romTypeStr = "HiROM"
@@ -105,8 +122,11 @@ func (s *SNESIdentifier) Identify(r io.ReaderAt, size int64, db Database) (*Resu
 	if (mapMode & 0x04) != 0 {
 		romTypeStr = "Ex" + romTypeStr
 	}
+	return romTypeStr
+}
 
-	// Determine hardware
+// snesGetHardware determines hardware configuration string.
+func snesGetHardware(romType, mapMode byte, data []byte, headerStart int) string {
 	var hardware string
 	switch {
 	case romType == 0:
@@ -125,78 +145,52 @@ func (s *SNESIdentifier) Identify(r io.ReaderAt, size int64, db Database) (*Resu
 	}
 
 	// Determine coprocessor if present
-	if romType >= 3 {
-		coprocessor := ""
-		chipByte := (mapMode & 0xF0) >> 4
-		switch chipByte {
-		case 0:
-			coprocessor = "DSP"
-		case 1:
-			coprocessor = "Super FX"
-		case 2:
-			coprocessor = "OBC1"
-		case 3:
-			coprocessor = "SA-1"
-		case 4:
-			coprocessor = "S-DD1"
-		case 5:
-			coprocessor = "S-RTC"
-		case 0xE:
-			coprocessor = "Super Game Boy / Satellaview"
-		case 0xF:
-			if headerStart > 0 {
-				prevByte := data[headerStart-1]
-				switch prevByte & 0x0F {
-				case 0:
-					coprocessor = "SPC7110"
-				case 1:
-					coprocessor = "ST010 / ST011"
-				case 2:
-					coprocessor = "ST018"
-				case 3:
-					coprocessor = "CX4"
-				}
-			}
-		}
-		if hardware != "" && coprocessor != "" {
+	if romType >= 3 && hardware != "" {
+		coprocessor := snesGetCoprocessor(mapMode, data, headerStart)
+		if coprocessor != "" {
 			hardware = hardware[:len(hardware)-1] + " (" + coprocessor + ")"
 		}
 	}
+	return hardware
+}
+
+// Identify extracts SNES game information from the given reader.
+func (*SNESIdentifier) Identify(reader io.ReaderAt, size int64, db Database) (*Result, error) {
+	// Read entire ROM for analysis
+	data := make([]byte, size)
+	if _, err := reader.ReadAt(data, 0); err != nil && err != io.EOF {
+		return nil, fmt.Errorf("failed to read SNES ROM: %w", err)
+	}
+
+	// Check for and strip 512-byte SMC header
+	if len(data)%1024 == 512 {
+		data = data[512:]
+	}
+
+	// Find and parse header
+	info, err := snesFindHeader(data)
+	if err != nil {
+		return nil, err
+	}
 
 	// Convert internal name to printable string for title fallback
-	internalNameStr := binary.ExtractPrintable(internalName)
+	internalNameStr := binary.ExtractPrintable(info.internalName)
 
 	result := NewResult(ConsoleSNES)
 	result.InternalTitle = internalNameStr
-	result.SetMetadata("internal_title", internalNameHex)
-	result.SetMetadata("fast_slow_rom", fastSlowROM)
-	result.SetMetadata("rom_type", romTypeStr)
-	result.SetMetadata("developer_ID", fmt.Sprintf("0x%02x", developerID))
-	result.SetMetadata("rom_version", fmt.Sprintf("%d", romVersion))
-	result.SetMetadata("checksum", fmt.Sprintf("0x%04x", checksum))
+	result.SetMetadata("internal_title", info.internalNameHex)
+	result.SetMetadata("fast_slow_rom", snesGetFastSlowROM(info.mapMode))
+	result.SetMetadata("rom_type", snesGetROMTypeStr(info.mapMode))
+	result.SetMetadata("developer_ID", fmt.Sprintf("0x%02x", info.developerID))
+	result.SetMetadata("rom_version", fmt.Sprintf("%d", info.romVersion))
+	result.SetMetadata("checksum", fmt.Sprintf("0x%04x", info.checksum))
 
-	if hardware != "" {
+	if hardware := snesGetHardware(info.romType, info.mapMode, data, info.headerStart); hardware != "" {
 		result.SetMetadata("hardware", hardware)
 	}
 
-	// Database lookup uses (developer_ID, internal_name_hex, rom_version, checksum) as key
-	if db != nil {
-		type snesKey struct {
-			developerID  int
-			internalName string
-			romVersion   int
-			checksum     int
-		}
-		key := snesKey{
-			developerID:  int(developerID),
-			internalName: internalNameHex,
-			romVersion:   int(romVersion),
-			checksum:     int(checksum),
-		}
-		if entry, found := db.Lookup(ConsoleSNES, key); found {
-			result.MergeMetadata(entry, false)
-		}
-	}
+	// Database lookup
+	snesLookupDatabase(result, db, info)
 
 	// If no title from database, use internal name
 	if result.Title == "" {
@@ -204,6 +198,73 @@ func (s *SNESIdentifier) Identify(r io.ReaderAt, size int64, db Database) (*Resu
 	}
 
 	return result, nil
+}
+
+// snesLookupDatabase performs database lookup for SNES game.
+func snesLookupDatabase(result *Result, db Database, info snesHeaderInfo) {
+	if db == nil {
+		return
+	}
+	type snesKey struct {
+		internalName string
+		developerID  int
+		romVersion   int
+		checksum     int
+	}
+	key := snesKey{
+		developerID:  int(info.developerID),
+		internalName: info.internalNameHex,
+		romVersion:   int(info.romVersion),
+		checksum:     int(info.checksum),
+	}
+	if entry, found := db.Lookup(ConsoleSNES, key); found {
+		result.MergeMetadata(entry)
+	}
+}
+
+// snesGetCoprocessor determines the coprocessor type from the map mode.
+func snesGetCoprocessor(mapMode byte, data []byte, headerStart int) string {
+	chipByte := (mapMode & 0xF0) >> 4
+	switch chipByte {
+	case 0:
+		return "DSP"
+	case 1:
+		return "Super FX"
+	case 2:
+		return "OBC1"
+	case 3:
+		return "SA-1"
+	case 4:
+		return "S-DD1"
+	case 5:
+		return "S-RTC"
+	case 0xE:
+		return "Super Game Boy / Satellaview"
+	case 0xF:
+		return snesGetExtendedCoprocessor(data, headerStart)
+	default:
+		return ""
+	}
+}
+
+// snesGetExtendedCoprocessor determines extended coprocessor type (0xF chip byte).
+func snesGetExtendedCoprocessor(data []byte, headerStart int) string {
+	if headerStart <= 0 {
+		return ""
+	}
+	prevByte := data[headerStart-1]
+	switch prevByte & 0x0F {
+	case 0:
+		return "SPC7110"
+	case 1:
+		return "ST010 / ST011"
+	case 2:
+		return "ST018"
+	case 3:
+		return "CX4"
+	default:
+		return ""
+	}
 }
 
 // ValidateSNES checks if the given data looks like a valid SNES ROM.

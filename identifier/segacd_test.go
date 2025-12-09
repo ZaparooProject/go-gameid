@@ -1,3 +1,21 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 package identifier
 
 import (
@@ -7,79 +25,68 @@ import (
 )
 
 // createSegaCDHeader creates a minimal valid Sega CD disc header for testing.
-// SegaCD header layout (offsets relative to magic word at 0x00):
-// 0x000: Disc ID (16 bytes) - contains magic word like "SEGADISCSYSTEM"
-// 0x010: Disc volume name (11 bytes)
-// 0x020: System name (11 bytes)
-// 0x050: Build date (8 bytes, MMDDYYYY)
-// 0x100: System type (16 bytes)
-// 0x118: Release year (4 bytes)
-// 0x11D: Release month (3 bytes)
-// 0x120: Title domestic (48 bytes)
-// 0x150: Title overseas (48 bytes)
-// 0x180: Game ID (16 bytes)
-// 0x190: Device support (16 bytes)
-// 0x1F0: Region support (3 bytes)
-func createSegaCDHeader(discID, discVolumeName, systemName, titleDomestic, titleOverseas, gameID string) []byte {
+func createSegaCDHeader(discVolumeName, systemName, titleDomestic, titleOverseas, gameID string) []byte {
 	// Sega CD header needs at least 0x300 bytes
 	header := make([]byte, 0x300)
 
 	// Magic word / Disc ID at offset 0x00 (16 bytes)
-	copy(header[0x00:], []byte("SEGADISCSYSTEM  "))
+	copy(header[0x00:], "SEGADISCSYSTEM  ")
 
 	// Disc volume name at offset 0x10 (11 bytes)
 	if len(discVolumeName) > 11 {
 		discVolumeName = discVolumeName[:11]
 	}
-	copy(header[0x10:], []byte(discVolumeName))
+	copy(header[0x10:], discVolumeName)
 
 	// System name at offset 0x20 (11 bytes)
 	if len(systemName) > 11 {
 		systemName = systemName[:11]
 	}
-	copy(header[0x20:], []byte(systemName))
+	copy(header[0x20:], systemName)
 
 	// Build date at offset 0x50 (8 bytes, MMDDYYYY)
-	copy(header[0x50:], []byte("08011993"))
+	copy(header[0x50:], "08011993")
 
 	// System type at offset 0x100 (16 bytes)
-	copy(header[0x100:], []byte("SEGA MEGA CD    "))
+	copy(header[0x100:], "SEGA MEGA CD    ")
 
 	// Release year at offset 0x118 (4 bytes)
-	copy(header[0x118:], []byte("1993"))
+	copy(header[0x118:], "1993")
 
 	// Release month at offset 0x11D (3 bytes)
-	copy(header[0x11D:], []byte("AUG"))
+	copy(header[0x11D:], "AUG")
 
 	// Title domestic at offset 0x120 (48 bytes)
 	if len(titleDomestic) > 48 {
 		titleDomestic = titleDomestic[:48]
 	}
-	copy(header[0x120:], []byte(titleDomestic))
+	copy(header[0x120:], titleDomestic)
 
 	// Title overseas at offset 0x150 (48 bytes)
 	if len(titleOverseas) > 48 {
 		titleOverseas = titleOverseas[:48]
 	}
-	copy(header[0x150:], []byte(titleOverseas))
+	copy(header[0x150:], titleOverseas)
 
 	// Game ID at offset 0x180 (16 bytes)
 	if len(gameID) > 16 {
 		gameID = gameID[:16]
 	}
-	copy(header[0x180:], []byte(gameID))
+	copy(header[0x180:], gameID)
 
 	// Device support at offset 0x190 (16 bytes)
-	copy(header[0x190:], []byte("J               "))
+	copy(header[0x190:], "J               ")
 
 	// Region support at offset 0x1F0 (3 bytes)
-	copy(header[0x1F0:], []byte("JUE"))
+	copy(header[0x1F0:], "JUE")
 
 	return header
 }
 
 func TestSegaCDIdentifier_Identify(t *testing.T) {
-	id := NewSegaCDIdentifier()
+	t.Parallel()
+
+	identifier := NewSegaCDIdentifier()
 
 	tests := []struct {
 		name           string
@@ -113,24 +120,32 @@ func TestSegaCDIdentifier_Identify(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			header := createSegaCDHeader("", tt.discVolumeName, tt.systemName, tt.titleDomestic, tt.titleOverseas, tt.gameID)
-			r := bytes.NewReader(header)
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-			result, err := id.Identify(r, int64(len(header)), nil)
+			header := createSegaCDHeader(
+				testCase.discVolumeName,
+				testCase.systemName,
+				testCase.titleDomestic,
+				testCase.titleOverseas,
+				testCase.gameID,
+			)
+			reader := bytes.NewReader(header)
+
+			result, err := identifier.Identify(reader, int64(len(header)), nil)
 			if err != nil {
 				t.Fatalf("Identify() error = %v", err)
 			}
 
 			// ID may include null padding - just check it starts with expected ID
-			if !strings.HasPrefix(result.ID, tt.wantID) {
-				t.Errorf("ID = %q, want prefix %q", result.ID, tt.wantID)
+			if !strings.HasPrefix(result.ID, testCase.wantID) {
+				t.Errorf("ID = %q, want prefix %q", result.ID, testCase.wantID)
 			}
 
 			// InternalTitle includes null padding - just check it starts with expected title
-			if !strings.HasPrefix(result.InternalTitle, tt.wantTitle) {
-				t.Errorf("InternalTitle = %q, want prefix %q", result.InternalTitle, tt.wantTitle)
+			if !strings.HasPrefix(result.InternalTitle, testCase.wantTitle) {
+				t.Errorf("InternalTitle = %q, want prefix %q", result.InternalTitle, testCase.wantTitle)
 			}
 
 			if result.Console != ConsoleSegaCD {
@@ -141,7 +156,9 @@ func TestSegaCDIdentifier_Identify(t *testing.T) {
 }
 
 func TestSegaCDIdentifier_DifferentMagicWords(t *testing.T) {
-	id := NewSegaCDIdentifier()
+	t.Parallel()
+
+	identifier := NewSegaCDIdentifier()
 
 	magicWords := []string{
 		"SEGADISCSYSTEM  ",
@@ -152,14 +169,16 @@ func TestSegaCDIdentifier_DifferentMagicWords(t *testing.T) {
 
 	for _, magic := range magicWords {
 		t.Run(magic, func(t *testing.T) {
+			t.Parallel()
+
 			header := make([]byte, 0x300)
-			copy(header[0x00:], []byte(magic))
-			copy(header[0x78:], []byte("Test Game"))
-			copy(header[0xA8:], []byte("TEST-001"))
+			copy(header[0x00:], magic)
+			copy(header[0x78:], "Test Game")
+			copy(header[0xA8:], "TEST-001")
 
-			r := bytes.NewReader(header)
+			reader := bytes.NewReader(header)
 
-			result, err := id.Identify(r, int64(len(header)), nil)
+			result, err := identifier.Identify(reader, int64(len(header)), nil)
 			if err != nil {
 				t.Fatalf("Identify() with magic %q error = %v", magic, err)
 			}
@@ -172,39 +191,45 @@ func TestSegaCDIdentifier_DifferentMagicWords(t *testing.T) {
 }
 
 func TestSegaCDIdentifier_InvalidMagic(t *testing.T) {
-	id := NewSegaCDIdentifier()
+	t.Parallel()
+
+	identifier := NewSegaCDIdentifier()
 
 	header := make([]byte, 0x300)
-	copy(header[0x00:], []byte("NOT A SEGA CD"))
+	copy(header[0x00:], "NOT A SEGA CD")
 
-	r := bytes.NewReader(header)
+	reader := bytes.NewReader(header)
 
-	_, err := id.Identify(r, int64(len(header)), nil)
+	_, err := identifier.Identify(reader, int64(len(header)), nil)
 	if err == nil {
 		t.Error("expected error for invalid magic word, got nil")
 	}
 }
 
 func TestSegaCDIdentifier_TooSmall(t *testing.T) {
-	id := NewSegaCDIdentifier()
+	t.Parallel()
+
+	identifier := NewSegaCDIdentifier()
 
 	header := make([]byte, 0x100) // Too small
-	r := bytes.NewReader(header)
+	reader := bytes.NewReader(header)
 
-	_, err := id.Identify(r, int64(len(header)), nil)
+	_, err := identifier.Identify(reader, int64(len(header)), nil)
 	if err == nil {
 		t.Error("expected error for small file, got nil")
 	}
 }
 
 func TestSegaCDIdentifier_OverseasTitlePreferred(t *testing.T) {
-	id := NewSegaCDIdentifier()
+	t.Parallel()
+
+	identifier := NewSegaCDIdentifier()
 
 	// Create header with both titles - overseas should be preferred
-	header := createSegaCDHeader("", "TEST", "SEGA", "DOMESTIC TITLE", "OVERSEAS TITLE", "TEST-001")
-	r := bytes.NewReader(header)
+	header := createSegaCDHeader("TEST", "SEGA", "DOMESTIC TITLE", "OVERSEAS TITLE", "TEST-001")
+	reader := bytes.NewReader(header)
 
-	result, err := id.Identify(r, int64(len(header)), nil)
+	result, err := identifier.Identify(reader, int64(len(header)), nil)
 	if err != nil {
 		t.Fatalf("Identify() error = %v", err)
 	}
@@ -216,6 +241,8 @@ func TestSegaCDIdentifier_OverseasTitlePreferred(t *testing.T) {
 }
 
 func TestValidateSegaCD(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name   string
 		header []byte
@@ -223,15 +250,15 @@ func TestValidateSegaCD(t *testing.T) {
 	}{
 		{
 			name:   "Valid - SEGADISCSYSTEM",
-			header: createSegaCDHeader("", "TEST", "SEGA", "Test", "Test", "TEST-001"),
+			header: createSegaCDHeader("TEST", "SEGA", "Test", "Test", "TEST-001"),
 			want:   true,
 		},
 		{
 			name: "Valid - SEGABOOTDISC",
 			header: func() []byte {
-				h := make([]byte, 0x300)
-				copy(h[0x00:], []byte("SEGABOOTDISC"))
-				return h
+				hdr := make([]byte, 0x300)
+				copy(hdr[0x00:], "SEGABOOTDISC")
+				return hdr
 			}(),
 			want: true,
 		},
@@ -242,11 +269,13 @@ func TestValidateSegaCD(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ValidateSegaCD(tt.header)
-			if got != tt.want {
-				t.Errorf("ValidateSegaCD() = %v, want %v", got, tt.want)
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := ValidateSegaCD(testCase.header)
+			if got != testCase.want {
+				t.Errorf("ValidateSegaCD() = %v, want %v", got, testCase.want)
 			}
 		})
 	}

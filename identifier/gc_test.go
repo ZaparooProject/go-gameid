@@ -1,3 +1,21 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 package identifier
 
 import (
@@ -12,12 +30,12 @@ func createGCHeader(gameID, makerCode, internalTitle string, diskID, version byt
 
 	// Game ID (4 bytes at 0x0000)
 	if len(gameID) >= 4 {
-		copy(header[gcGameIDOffset:], []byte(gameID[:4]))
+		copy(header[gcGameIDOffset:], gameID[:4])
 	}
 
 	// Maker code (2 bytes at 0x0004)
 	if len(makerCode) >= 2 {
-		copy(header[gcMakerCodeOffset:], []byte(makerCode[:2]))
+		copy(header[gcMakerCodeOffset:], makerCode[:2])
 	}
 
 	// Disk ID (1 byte at 0x0006)
@@ -39,18 +57,21 @@ func createGCHeader(gameID, makerCode, internalTitle string, diskID, version byt
 	return header
 }
 
+//nolint:gocognit,revive,funlen // Table-driven test with many test cases
 func TestGCIdentifier_Identify(t *testing.T) {
-	id := NewGCIdentifier()
+	t.Parallel()
+
+	identifier := NewGCIdentifier()
 
 	tests := []struct {
 		name          string
 		gameID        string
 		makerCode     string
 		internalTitle string
-		diskID        byte
-		version       byte
 		wantID        string
 		wantTitle     string
+		diskID        byte
+		version       byte
 	}{
 		{
 			name:          "Super Smash Bros Melee",
@@ -84,22 +105,30 @@ func TestGCIdentifier_Identify(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			header := createGCHeader(tt.gameID, tt.makerCode, tt.internalTitle, tt.diskID, tt.version)
-			r := bytes.NewReader(header)
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-			result, err := id.Identify(r, int64(len(header)), nil)
+			header := createGCHeader(
+				testCase.gameID,
+				testCase.makerCode,
+				testCase.internalTitle,
+				testCase.diskID,
+				testCase.version,
+			)
+			reader := bytes.NewReader(header)
+
+			result, err := identifier.Identify(reader, int64(len(header)), nil)
 			if err != nil {
 				t.Fatalf("Identify() error = %v", err)
 			}
 
-			if result.ID != tt.wantID {
-				t.Errorf("ID = %q, want %q", result.ID, tt.wantID)
+			if result.ID != testCase.wantID {
+				t.Errorf("ID = %q, want %q", result.ID, testCase.wantID)
 			}
 
-			if result.InternalTitle != tt.wantTitle {
-				t.Errorf("InternalTitle = %q, want %q", result.InternalTitle, tt.wantTitle)
+			if result.InternalTitle != testCase.wantTitle {
+				t.Errorf("InternalTitle = %q, want %q", result.InternalTitle, testCase.wantTitle)
 			}
 
 			if result.Console != ConsoleGC {
@@ -107,42 +136,48 @@ func TestGCIdentifier_Identify(t *testing.T) {
 			}
 
 			// Check metadata
-			if result.Metadata["maker_code"] != tt.makerCode {
-				t.Errorf("maker_code = %q, want %q", result.Metadata["maker_code"], tt.makerCode)
+			if result.Metadata["maker_code"] != testCase.makerCode {
+				t.Errorf("maker_code = %q, want %q", result.Metadata["maker_code"], testCase.makerCode)
 			}
 		})
 	}
 }
 
 func TestGCIdentifier_InvalidMagic(t *testing.T) {
-	id := NewGCIdentifier()
+	t.Parallel()
+
+	identifier := NewGCIdentifier()
 
 	// Create header without magic word
 	header := make([]byte, gcHeaderSize)
-	copy(header[gcGameIDOffset:], []byte("GALE"))
+	copy(header[gcGameIDOffset:], "GALE")
 	// Don't set magic word
 
-	r := bytes.NewReader(header)
+	reader := bytes.NewReader(header)
 
-	_, err := id.Identify(r, int64(len(header)), nil)
+	_, err := identifier.Identify(reader, int64(len(header)), nil)
 	if err == nil {
 		t.Error("expected error for invalid magic word, got nil")
 	}
 }
 
 func TestGCIdentifier_TooSmall(t *testing.T) {
-	id := NewGCIdentifier()
+	t.Parallel()
+
+	identifier := NewGCIdentifier()
 
 	header := make([]byte, 0x100) // Too small
-	r := bytes.NewReader(header)
+	reader := bytes.NewReader(header)
 
-	_, err := id.Identify(r, int64(len(header)), nil)
+	_, err := identifier.Identify(reader, int64(len(header)), nil)
 	if err == nil {
 		t.Error("expected error for small file, got nil")
 	}
 }
 
 func TestValidateGC(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name   string
 		header []byte
@@ -165,11 +200,13 @@ func TestValidateGC(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ValidateGC(tt.header)
-			if got != tt.want {
-				t.Errorf("ValidateGC() = %v, want %v", got, tt.want)
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := ValidateGC(testCase.header)
+			if got != testCase.want {
+				t.Errorf("ValidateGC() = %v, want %v", got, testCase.want)
 			}
 		})
 	}

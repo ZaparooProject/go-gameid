@@ -1,8 +1,27 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 // Package binary provides utilities for reading binary data from ROM and disc images.
 package binary
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"strings"
 )
@@ -10,7 +29,10 @@ import (
 // ReadAt reads len(buf) bytes from r at offset.
 func ReadAt(r io.ReaderAt, offset int64, buf []byte) error {
 	_, err := r.ReadAt(buf, offset)
-	return err
+	if err != nil {
+		return fmt.Errorf("read at offset %d: %w", offset, err)
+	}
+	return nil
 }
 
 // ReadBytesAt reads n bytes from r at offset.
@@ -86,16 +108,16 @@ func ReadPrintableStringAt(r io.ReaderAt, offset int64, n int) (string, error) {
 }
 
 // CleanString converts bytes to a string, trimming null bytes and whitespace.
-func CleanString(b []byte) string {
+func CleanString(data []byte) string {
 	// Find the first null byte
-	end := len(b)
-	for i, c := range b {
+	end := len(data)
+	for i, c := range data {
 		if c == 0 {
 			end = i
 			break
 		}
 	}
-	return strings.TrimSpace(string(b[:end]))
+	return strings.TrimSpace(string(data[:end]))
 }
 
 // ExtractPrintable extracts only printable ASCII characters (0x20-0x7E) from bytes.
@@ -103,7 +125,7 @@ func ExtractPrintable(b []byte) string {
 	var result strings.Builder
 	for _, c := range b {
 		if c >= 0x20 && c <= 0x7E {
-			result.WriteByte(c)
+			_ = result.WriteByte(c)
 		}
 	}
 	return strings.TrimSpace(result.String())
@@ -135,16 +157,16 @@ func FindBytes(haystack, needle []byte) int {
 	return -1
 }
 
-// FindBytesInRange searches for needle in r between start and end offsets.
+// FindBytesInRange searches for needle in reader between start and end offsets.
 // Returns the absolute offset or -1 if not found.
-func FindBytesInRange(r io.ReaderAt, start, end int64, needle []byte) (int64, error) {
+func FindBytesInRange(reader io.ReaderAt, start, end int64, needle []byte) (int64, error) {
 	size := end - start
 	if size <= 0 {
 		return -1, nil
 	}
 	buf := make([]byte, size)
-	if _, err := r.ReadAt(buf, start); err != nil && err != io.EOF {
-		return -1, err
+	if _, err := reader.ReadAt(buf, start); err != nil && err != io.EOF {
+		return -1, fmt.Errorf("read bytes in range %d-%d: %w", start, end, err)
 	}
 	idx := FindBytes(buf, needle)
 	if idx == -1 {

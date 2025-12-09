@@ -1,3 +1,21 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 package identifier
 
 import (
@@ -5,13 +23,7 @@ import (
 	"testing"
 )
 
-// createN64Header creates a minimal valid N64 ROM header for testing.
-// The N64 header layout:
-// 0x00-0x03: First word (magic)
-// 0x20-0x33: Internal name (20 bytes)
-// 0x3C-0x3D: Cartridge ID (2 bytes)
-// 0x3E: Country code
-// 0x3F: Version
+// createN64HeaderBigEndian creates a minimal valid N64 ROM header for testing in big-endian format.
 func createN64HeaderBigEndian(cartID, countryCode, title string) []byte {
 	header := make([]byte, 0x40)
 
@@ -26,11 +38,11 @@ func createN64HeaderBigEndian(cartID, countryCode, title string) []byte {
 	if len(titleBytes) > 20 {
 		titleBytes = titleBytes[:20]
 	}
-	for i := 0; i < 20; i++ {
-		if i < len(titleBytes) {
-			header[0x20+i] = titleBytes[i]
+	for idx := range 20 {
+		if idx < len(titleBytes) {
+			header[0x20+idx] = titleBytes[idx]
 		} else {
-			header[0x20+i] = ' '
+			header[0x20+idx] = ' '
 		}
 	}
 
@@ -51,41 +63,43 @@ func createN64HeaderBigEndian(cartID, countryCode, title string) []byte {
 	return header
 }
 
-// createN64HeaderByteSwapped creates a byte-swapped (.v64) format header
+// createN64HeaderByteSwapped creates a byte-swapped (.v64) format header.
 func createN64HeaderByteSwapped(cartID, countryCode, title string) []byte {
 	// First create big-endian header
 	header := createN64HeaderBigEndian(cartID, countryCode, title)
 
 	// Then byte-swap it (swap pairs of bytes)
-	for i := 0; i < len(header); i += 2 {
-		header[i], header[i+1] = header[i+1], header[i]
+	for idx := 0; idx < len(header); idx += 2 {
+		header[idx], header[idx+1] = header[idx+1], header[idx]
 	}
 
 	return header
 }
 
-// createN64HeaderWordSwapped creates a word-swapped (.n64) format header
+// createN64HeaderWordSwapped creates a word-swapped (.n64) format header.
 func createN64HeaderWordSwapped(cartID, countryCode, title string) []byte {
 	// First create big-endian header
 	header := createN64HeaderBigEndian(cartID, countryCode, title)
 
 	// Then word-swap it (reverse each 4-byte word)
-	for i := 0; i < len(header); i += 4 {
-		header[i], header[i+1], header[i+2], header[i+3] =
-			header[i+3], header[i+2], header[i+1], header[i]
+	for idx := 0; idx < len(header); idx += 4 {
+		a, b, c, d := header[idx], header[idx+1], header[idx+2], header[idx+3]
+		header[idx], header[idx+1], header[idx+2], header[idx+3] = d, c, b, a
 	}
 
 	return header
 }
 
 func TestN64Identifier_Identify(t *testing.T) {
-	id := NewN64Identifier()
+	t.Parallel()
+
+	identifier := NewN64Identifier()
 
 	tests := []struct {
 		name      string
-		header    []byte
 		wantID    string
 		wantTitle string
+		header    []byte
 	}{
 		{
 			name:      "Big endian Z64",
@@ -107,21 +121,23 @@ func TestN64Identifier_Identify(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r := bytes.NewReader(tt.header)
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-			result, err := id.Identify(r, int64(len(tt.header)), nil)
+			reader := bytes.NewReader(testCase.header)
+
+			result, err := identifier.Identify(reader, int64(len(testCase.header)), nil)
 			if err != nil {
 				t.Fatalf("Identify() error = %v", err)
 			}
 
-			if result.ID != tt.wantID {
-				t.Errorf("ID = %q, want %q", result.ID, tt.wantID)
+			if result.ID != testCase.wantID {
+				t.Errorf("ID = %q, want %q", result.ID, testCase.wantID)
 			}
 
-			if result.InternalTitle != tt.wantTitle {
-				t.Errorf("InternalTitle = %q, want %q", result.InternalTitle, tt.wantTitle)
+			if result.InternalTitle != testCase.wantTitle {
+				t.Errorf("InternalTitle = %q, want %q", result.InternalTitle, testCase.wantTitle)
 			}
 
 			if result.Console != ConsoleN64 {
@@ -132,14 +148,16 @@ func TestN64Identifier_Identify(t *testing.T) {
 }
 
 func TestN64Identifier_InvalidMagic(t *testing.T) {
-	id := NewN64Identifier()
+	t.Parallel()
+
+	identifier := NewN64Identifier()
 
 	// Create header with invalid magic word
 	header := make([]byte, 0x40)
-	copy(header[0x20:], []byte("SOME GAME TITLE"))
+	copy(header[0x20:], "SOME GAME TITLE")
 
-	r := bytes.NewReader(header)
-	_, err := id.Identify(r, int64(len(header)), nil)
+	reader := bytes.NewReader(header)
+	_, err := identifier.Identify(reader, int64(len(header)), nil)
 
 	if err == nil {
 		t.Error("expected error for invalid magic word, got nil")
@@ -147,12 +165,14 @@ func TestN64Identifier_InvalidMagic(t *testing.T) {
 }
 
 func TestN64Identifier_TooSmall(t *testing.T) {
-	id := NewN64Identifier()
+	t.Parallel()
+
+	identifier := NewN64Identifier()
 
 	header := make([]byte, 0x20) // Need at least 0x40
 
-	r := bytes.NewReader(header)
-	_, err := id.Identify(r, int64(len(header)), nil)
+	reader := bytes.NewReader(header)
+	_, err := identifier.Identify(reader, int64(len(header)), nil)
 
 	if err == nil {
 		t.Error("expected error for small file, got nil")
@@ -160,6 +180,8 @@ func TestN64Identifier_TooSmall(t *testing.T) {
 }
 
 func TestValidateN64(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name   string
 		header []byte
@@ -187,11 +209,13 @@ func TestValidateN64(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ValidateN64(tt.header)
-			if got != tt.want {
-				t.Errorf("ValidateN64() = %v, want %v", got, tt.want)
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := ValidateN64(testCase.header)
+			if got != testCase.want {
+				t.Errorf("ValidateN64() = %v, want %v", got, testCase.want)
 			}
 		})
 	}

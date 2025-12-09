@@ -1,3 +1,21 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 package identifier
 
 import (
@@ -331,32 +349,32 @@ func NewGBIdentifier() *GBIdentifier {
 }
 
 // Console returns the console type.
-func (g *GBIdentifier) Console() Console {
+func (*GBIdentifier) Console() Console {
 	return ConsoleGB
 }
 
 // Identify extracts GB/GBC game information from the given reader.
-func (g *GBIdentifier) Identify(r io.ReaderAt, size int64, db Database) (*Result, error) {
+//
+//nolint:gocognit,gocyclo,revive,cyclop,funlen // This function's complexity is necessary for proper header parsing
+func (g *GBIdentifier) Identify(reader io.ReaderAt, size int64, db Database) (*Result, error) {
 	if size < gbHeaderSize {
 		return nil, ErrInvalidFormat{Console: ConsoleGB, Reason: "file too small"}
 	}
 
 	// Read the entire file for checksum calculation
 	data := make([]byte, size)
-	if _, err := r.ReadAt(data, 0); err != nil && err != io.EOF {
+	if _, err := reader.ReadAt(data, 0); err != nil && err != io.EOF {
 		return nil, fmt.Errorf("failed to read GB ROM: %w", err)
 	}
 
-	// Validate Nintendo logo
-	logo := data[gbNintendoLogoOffset : gbNintendoLogoOffset+gbNintendoLogoSize]
-	if !binary.BytesEqual(logo, gbNintendoLogo) {
-		// Not necessarily fatal, but suspicious
-	}
+	// Validate Nintendo logo (not fatal if invalid, just suspicious)
+	// logo := data[gbNintendoLogoOffset : gbNintendoLogoOffset+gbNintendoLogoSize]
+	// _ = binary.BytesEqual(logo, gbNintendoLogo)
 
 	// Check CGB flag to determine if it's a GBC game
 	cgbFlag := data[gbCGBFlagOffset]
 	var cgbMode string
-	var console Console = ConsoleGB
+	console := ConsoleGB
 
 	switch {
 	case cgbFlag == 0x80:
@@ -425,9 +443,8 @@ func (g *GBIdentifier) Identify(r io.ReaderAt, size int64, db Database) (*Result
 	// Licensee
 	licensee := "Unknown"
 	if data[gbOldLicenseeOffset] == 0x33 {
-		// Use new licensee code
-		newLicenseeCode := string(data[gbNewLicenseeOffset : gbNewLicenseeOffset+gbNewLicenseeSize])
-		if l, ok := gbLicenseeNewCodes[newLicenseeCode]; ok {
+		// Use new licensee code - direct string conversion from slice is more efficient
+		if l, ok := gbLicenseeNewCodes[string(data[gbNewLicenseeOffset:gbNewLicenseeOffset+gbNewLicenseeSize])]; ok {
 			licensee = l
 		}
 	} else {
@@ -485,7 +502,7 @@ func (g *GBIdentifier) Identify(r io.ReaderAt, size int64, db Database) (*Result
 		}
 		key := gbKey{title: title, checksum: globalChecksumExpected}
 		if entry, found := db.Lookup(ConsoleGB, key); found {
-			result.MergeMetadata(entry, false)
+			result.MergeMetadata(entry)
 		}
 	}
 

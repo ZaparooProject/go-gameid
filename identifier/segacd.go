@@ -1,3 +1,21 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 package identifier
 
 import (
@@ -28,18 +46,18 @@ func NewSegaCDIdentifier() *SegaCDIdentifier {
 }
 
 // Console returns the console type.
-func (s *SegaCDIdentifier) Console() Console {
+func (*SegaCDIdentifier) Console() Console {
 	return ConsoleSegaCD
 }
 
 // Identify extracts Sega CD game information from the given reader.
-func (s *SegaCDIdentifier) Identify(r io.ReaderAt, size int64, db Database) (*Result, error) {
+func (s *SegaCDIdentifier) Identify(reader io.ReaderAt, size int64, db Database) (*Result, error) {
 	if size < 0x300 {
 		return nil, ErrInvalidFormat{Console: ConsoleSegaCD, Reason: "file too small"}
 	}
 
 	// Read header
-	header, err := binary.ReadBytesAt(r, 0, 0x300)
+	header, err := binary.ReadBytesAt(reader, 0, 0x300)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read Sega CD header: %w", err)
 	}
@@ -48,61 +66,66 @@ func (s *SegaCDIdentifier) Identify(r io.ReaderAt, size int64, db Database) (*Re
 }
 
 // IdentifyFromPath identifies a Sega CD game from a file path.
-func (s *SegaCDIdentifier) IdentifyFromPath(path string, db Database) (*Result, error) {
+func (s *SegaCDIdentifier) IdentifyFromPath(path string, database Database) (*Result, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 
-	var header []byte
-	var iso *iso9660.ISO9660
-
 	if ext == ".cue" {
-		cue, err := iso9660.ParseCue(path)
-		if err != nil {
-			return nil, err
-		}
-		if len(cue.BinFiles) == 0 {
-			return nil, ErrInvalidFormat{Console: ConsoleSegaCD, Reason: "no BIN files in CUE"}
-		}
-		f, err := os.Open(cue.BinFiles[0])
-		if err != nil {
-			return nil, err
-		}
-		defer f.Close()
-		header = make([]byte, 0x300)
-		if _, err := f.Read(header); err != nil {
-			return nil, err
-		}
-		iso, _ = iso9660.OpenCue(path)
-	} else {
-		f, err := os.Open(path)
-		if err != nil {
-			return nil, err
-		}
-		defer f.Close()
-		header = make([]byte, 0x300)
-		if _, err := f.Read(header); err != nil {
-			return nil, err
-		}
-		iso, _ = iso9660.Open(path)
+		return s.identifyFromCue(path, database)
 	}
-
-	if iso != nil {
-		defer iso.Close()
-	}
-
-	return s.identifyFromHeader(header, db, iso)
+	return s.identifyFromISO(path, database)
 }
 
-func (s *SegaCDIdentifier) identifyFromHeader(header []byte, db Database, iso *iso9660.ISO9660) (*Result, error) {
-	// Find magic word
-	var magicIdx int = -1
-	for _, magic := range segaCDMagicWords {
-		idx := binary.FindBytes(header, magic)
-		if idx != -1 {
-			magicIdx = idx
-			break
-		}
+func (s *SegaCDIdentifier) identifyFromCue(path string, database Database) (*Result, error) {
+	cue, err := iso9660.ParseCue(path)
+	if err != nil {
+		return nil, fmt.Errorf("parse CUE: %w", err)
+	}
+	if len(cue.BinFiles) == 0 {
+		return nil, ErrInvalidFormat{Console: ConsoleSegaCD, Reason: "no BIN files in CUE"}
+	}
+	binFile, err := os.Open(cue.BinFiles[0])
+	if err != nil {
+		return nil, fmt.Errorf("open BIN file: %w", err)
+	}
+	defer func() { _ = binFile.Close() }()
+
+	header := make([]byte, 0x300)
+	if _, err := binFile.Read(header); err != nil {
+		return nil, fmt.Errorf("read BIN header: %w", err)
 	}
 
+	iso, _ := iso9660.OpenCue(path)
+	if iso != nil {
+		defer func() { _ = iso.Close() }()
+	}
+
+	return s.identifyFromHeader(header, database, iso)
+}
+
+func (s *SegaCDIdentifier) identifyFromISO(path string, database Database) (*Result, error) {
+	isoFile, err := os.Open(path) //nolint:gosec // Path from user input is expected
+	if err != nil {
+		return nil, fmt.Errorf("open ISO file: %w", err)
+	}
+	defer func() { _ = isoFile.Close() }()
+
+	header := make([]byte, 0x300)
+	if _, err := isoFile.Read(header); err != nil {
+		return nil, fmt.Errorf("read ISO header: %w", err)
+	}
+
+	iso, _ := iso9660.Open(path)
+	if iso != nil {
+		defer func() { _ = iso.Close() }()
+	}
+
+	return s.identifyFromHeader(header, database, iso)
+}
+
+//nolint:funlen,revive // Header parsing requires many field extractions
+func (s *SegaCDIdentifier) identifyFromHeader(header []byte, db Database, iso *iso9660.ISO9660) (*Result, error) {
+	// Find magic word
+	magicIdx := findSegaCDMagicWord(header)
 	if magicIdx == -1 {
 		return nil, ErrInvalidFormat{Console: ConsoleSegaCD, Reason: "magic word not found"}
 	}
@@ -122,14 +145,7 @@ func (s *SegaCDIdentifier) identifyFromHeader(header []byte, db Database, iso *i
 	systemName := extractString(0x020, 0x0B)
 
 	// Build date at 0x50 (MMDDYYYY format)
-	buildDateRaw := extractString(0x050, 0x08)
-	var buildDate string
-	if len(buildDateRaw) == 8 {
-		// Convert MMDDYYYY to YYYY-MM-DD
-		buildDate = buildDateRaw[4:8] + "-" + buildDateRaw[0:2] + "-" + buildDateRaw[2:4]
-	} else {
-		buildDate = buildDateRaw
-	}
+	buildDate := parseSegaCDBuildDate(extractString(0x050, 0x08))
 
 	// System type and release info (at 0x100+ like Genesis)
 	systemType := extractString(0x100, 0x10)
@@ -144,29 +160,10 @@ func (s *SegaCDIdentifier) identifyFromHeader(header []byte, db Database, iso *i
 	gameID := extractString(0x180, 0x10)
 
 	// Device support
-	deviceSupportBytes := header[magicIdx+0x190 : magicIdx+0x1A0]
-	var deviceSupport []string
-	for _, b := range deviceSupportBytes {
-		if b == 0 || b == ' ' {
-			continue
-		}
-		if dev, ok := genesisDeviceSupport[b]; ok {
-			deviceSupport = append(deviceSupport, dev)
-		}
-	}
+	deviceSupport := parseSegaCDDeviceSupport(header, magicIdx)
 
 	// Region support (at 0x1F0 from magic word for Genesis layout)
-	var regionSupport []string
-	if magicIdx+0x1F3 <= len(header) {
-		for _, b := range header[magicIdx+0x1F0 : magicIdx+0x1F3] {
-			if b < '!' || b > '~' {
-				continue
-			}
-			if reg, ok := genesisRegionSupport[b]; ok {
-				regionSupport = append(regionSupport, reg)
-			}
-		}
-	}
+	regionSupport := parseSegaCDRegionSupport(header, magicIdx)
 
 	// Normalize serial for database lookup
 	serial := strings.ReplaceAll(gameID, "#", "")
@@ -209,7 +206,7 @@ func (s *SegaCDIdentifier) identifyFromHeader(header []byte, db Database, iso *i
 	// Database lookup
 	if db != nil && serial != "" {
 		if entry, found := db.LookupByString(ConsoleSegaCD, serial); found {
-			result.MergeMetadata(entry, false)
+			result.MergeMetadata(entry)
 		}
 	}
 
@@ -219,6 +216,57 @@ func (s *SegaCDIdentifier) identifyFromHeader(header []byte, db Database, iso *i
 	}
 
 	return result, nil
+}
+
+// findSegaCDMagicWord searches for a Sega CD magic word in the header.
+func findSegaCDMagicWord(header []byte) int {
+	for _, magic := range segaCDMagicWords {
+		idx := binary.FindBytes(header, magic)
+		if idx != -1 {
+			return idx
+		}
+	}
+	return -1
+}
+
+// parseSegaCDBuildDate parses MMDDYYYY format to YYYY-MM-DD.
+func parseSegaCDBuildDate(raw string) string {
+	if len(raw) == 8 {
+		return raw[4:8] + "-" + raw[0:2] + "-" + raw[2:4]
+	}
+	return raw
+}
+
+// parseSegaCDDeviceSupport extracts device support codes from header.
+func parseSegaCDDeviceSupport(header []byte, magicIdx int) []string {
+	var deviceSupport []string
+	deviceSupportBytes := header[magicIdx+0x190 : magicIdx+0x1A0]
+	for _, b := range deviceSupportBytes {
+		if b == 0 || b == ' ' {
+			continue
+		}
+		if dev, ok := genesisDeviceSupport[b]; ok {
+			deviceSupport = append(deviceSupport, dev)
+		}
+	}
+	return deviceSupport
+}
+
+// parseSegaCDRegionSupport extracts region support codes from header.
+func parseSegaCDRegionSupport(header []byte, magicIdx int) []string {
+	var regionSupport []string
+	if magicIdx+0x1F3 > len(header) {
+		return regionSupport
+	}
+	for _, b := range header[magicIdx+0x1F0 : magicIdx+0x1F3] {
+		if b < '!' || b > '~' {
+			continue
+		}
+		if reg, ok := genesisRegionSupport[b]; ok {
+			regionSupport = append(regionSupport, reg)
+		}
+	}
+	return regionSupport
 }
 
 // ValidateSegaCD checks if the given data looks like a valid Sega CD disc.

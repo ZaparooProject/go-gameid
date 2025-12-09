@@ -1,3 +1,21 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 package identifier
 
 import (
@@ -32,18 +50,18 @@ func NewGCIdentifier() *GCIdentifier {
 }
 
 // Console returns the console type.
-func (g *GCIdentifier) Console() Console {
+func (*GCIdentifier) Console() Console {
 	return ConsoleGC
 }
 
 // Identify extracts GameCube game information from the given reader.
-func (g *GCIdentifier) Identify(r io.ReaderAt, size int64, db Database) (*Result, error) {
+func (*GCIdentifier) Identify(reader io.ReaderAt, size int64, db Database) (*Result, error) {
 	if size < gcHeaderSize {
 		return nil, ErrInvalidFormat{Console: ConsoleGC, Reason: "file too small"}
 	}
 
 	// Read header
-	header, err := binary.ReadBytesAt(r, 0, gcHeaderSize)
+	header, err := binary.ReadBytesAt(reader, 0, gcHeaderSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read GameCube header: %w", err)
 	}
@@ -79,7 +97,7 @@ func (g *GCIdentifier) Identify(r io.ReaderAt, size int64, db Database) (*Result
 	// Database lookup
 	if db != nil && gameID != "" {
 		if entry, found := db.LookupByString(ConsoleGC, gameID); found {
-			result.MergeMetadata(entry, false)
+			result.MergeMetadata(entry)
 		}
 	}
 

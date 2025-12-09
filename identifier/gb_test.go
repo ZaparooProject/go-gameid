@@ -1,3 +1,21 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 package identifier
 
 import (
@@ -62,16 +80,18 @@ func createGBHeader(title string, cgbFlag byte, checksum uint16, cartType byte) 
 }
 
 func TestGBIdentifier_Identify(t *testing.T) {
-	id := NewGBIdentifier()
+	t.Parallel()
+
+	identifier := NewGBIdentifier()
 
 	tests := []struct {
 		name        string
 		title       string
-		cgbFlag     byte
-		checksum    uint16
-		cartType    byte
 		wantTitle   string
 		wantConsole Console
+		checksum    uint16
+		cgbFlag     byte
+		cartType    byte
 	}{
 		{
 			name:        "GB Game",
@@ -102,22 +122,24 @@ func TestGBIdentifier_Identify(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			header := createGBHeader(tt.title, tt.cgbFlag, tt.checksum, tt.cartType)
-			r := bytes.NewReader(header)
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-			result, err := id.Identify(r, int64(len(header)), nil)
+			header := createGBHeader(testCase.title, testCase.cgbFlag, testCase.checksum, testCase.cartType)
+			reader := bytes.NewReader(header)
+
+			result, err := identifier.Identify(reader, int64(len(header)), nil)
 			if err != nil {
 				t.Fatalf("Identify() error = %v", err)
 			}
 
-			if result.InternalTitle != tt.wantTitle {
-				t.Errorf("InternalTitle = %q, want %q", result.InternalTitle, tt.wantTitle)
+			if result.InternalTitle != testCase.wantTitle {
+				t.Errorf("InternalTitle = %q, want %q", result.InternalTitle, testCase.wantTitle)
 			}
 
-			if result.Console != tt.wantConsole {
-				t.Errorf("Console = %v, want %v", result.Console, tt.wantConsole)
+			if result.Console != testCase.wantConsole {
+				t.Errorf("Console = %v, want %v", result.Console, testCase.wantConsole)
 			}
 
 			// Check checksum is in metadata
@@ -129,10 +151,12 @@ func TestGBIdentifier_Identify(t *testing.T) {
 }
 
 func TestGBIdentifier_InvalidLogo(t *testing.T) {
+	t.Parallel()
+
 	// GB identifier doesn't fail on invalid logo, it just continues
 	// But ValidateGB should return false
 	header := make([]byte, 0x150)
-	copy(header[0x134:], []byte("TEST"))
+	copy(header[0x134:], "TEST")
 
 	if ValidateGB(header) {
 		t.Error("ValidateGB() should return false for invalid logo")
@@ -140,13 +164,15 @@ func TestGBIdentifier_InvalidLogo(t *testing.T) {
 }
 
 func TestGBIdentifier_TooSmall(t *testing.T) {
-	id := NewGBIdentifier()
+	t.Parallel()
+
+	identifier := NewGBIdentifier()
 
 	// Create header that's too small
 	header := make([]byte, 0x100) // Need at least 0x150
 
-	r := bytes.NewReader(header)
-	_, err := id.Identify(r, int64(len(header)), nil)
+	reader := bytes.NewReader(header)
+	_, err := identifier.Identify(reader, int64(len(header)), nil)
 
 	if err == nil {
 		t.Error("expected error for small file, got nil")

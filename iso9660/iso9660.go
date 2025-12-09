@@ -1,3 +1,21 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 // Package iso9660 provides parsing for ISO9660 disc images.
 package iso9660
 
@@ -38,33 +56,35 @@ type pathTableEntry struct {
 // ISO9660 represents a parsed ISO9660 disc image.
 type ISO9660 struct {
 	file        *os.File
-	blockSize   int
-	blockOffset int64
 	pvd         []byte
 	pathTable   []pathTableEntry
+	blockSize   int
+	blockOffset int64
 	size        int64
 }
 
 // Open opens an ISO9660 disc image from a file.
 func Open(path string) (*ISO9660, error) {
-	f, err := os.Open(path)
+	isoFile, err := os.Open(path) //nolint:gosec // Path from user input is expected
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open ISO file: %w", err)
 	}
 
-	info, err := f.Stat()
+	info, err := isoFile.Stat()
 	if err != nil {
-		f.Close()
-		return nil, err
+		_ = isoFile.Close()
+
+		return nil, fmt.Errorf("stat ISO file: %w", err)
 	}
 
 	iso := &ISO9660{
-		file: f,
+		file: isoFile,
 		size: info.Size(),
 	}
 
 	if err := iso.init(); err != nil {
-		f.Close()
+		_ = isoFile.Close()
+
 		return nil, err
 	}
 
@@ -73,18 +93,18 @@ func Open(path string) (*ISO9660, error) {
 
 // OpenReader creates an ISO9660 from an io.ReaderAt.
 // The caller is responsible for closing the underlying reader if needed.
-func OpenReader(r io.ReaderAt, size int64) (*ISO9660, error) {
+func OpenReader(reader io.ReaderAt, size int64) (*ISO9660, error) {
 	iso := &ISO9660{
 		size: size,
 	}
 
 	// Create a wrapper that implements the file interface we need
-	if f, ok := r.(*os.File); ok {
-		iso.file = f
-	} else {
+	fileReader, ok := reader.(*os.File)
+	if !ok {
 		// For non-file readers, we need a different approach
 		return nil, errors.New("OpenReader currently only supports *os.File")
 	}
+	iso.file = fileReader
 
 	if err := iso.init(); err != nil {
 		return nil, err
@@ -96,11 +116,12 @@ func OpenReader(r io.ReaderAt, size int64) (*ISO9660, error) {
 // init initializes the ISO9660 structure by finding PVD and parsing path table.
 func (iso *ISO9660) init() error {
 	// Determine block size from file size
-	if iso.size%2352 == 0 {
+	switch {
+	case iso.size%2352 == 0:
 		iso.blockSize = 2352
-	} else if iso.size%2048 == 0 {
+	case iso.size%2048 == 0:
 		iso.blockSize = 2048
-	} else {
+	default:
 		return ErrInvalidBlock
 	}
 
@@ -208,7 +229,9 @@ func (iso *ISO9660) parsePathTable() error {
 // Close closes the ISO9660 file.
 func (iso *ISO9660) Close() error {
 	if iso.file != nil {
-		return iso.file.Close()
+		if err := iso.file.Close(); err != nil {
+			return fmt.Errorf("close ISO file: %w", err)
+		}
 	}
 	return nil
 }
@@ -270,6 +293,8 @@ func (iso *ISO9660) GetUUID() string {
 
 // IterFiles returns a list of files in the filesystem.
 // If onlyRootDir is true, only files in the root directory are returned.
+//
+//nolint:gocognit,revive // Directory traversal requires checking many conditions
 func (iso *ISO9660) IterFiles(onlyRootDir bool) ([]FileInfo, error) {
 	var files []FileInfo
 
@@ -362,13 +387,13 @@ func (iso *ISO9660) ReadFileByPath(path string) ([]byte, error) {
 		path = "/" + path
 	}
 
-	for _, f := range files {
+	for _, file := range files {
 		// ISO9660 filenames often have version suffix (;1)
-		fpath := strings.ToUpper(f.Path)
+		fpath := strings.ToUpper(file.Path)
 		fpath = strings.Split(fpath, ";")[0]
 
-		if fpath == path || f.Path == path {
-			return iso.ReadFile(f)
+		if fpath == path || file.Path == path {
+			return iso.ReadFile(file)
 		}
 	}
 

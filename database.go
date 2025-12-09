@@ -1,3 +1,21 @@
+// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of go-gameid.
+//
+// go-gameid is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// go-gameid is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
+
 package gameid
 
 import (
@@ -40,8 +58,8 @@ type gbKey struct {
 
 // snesKey is the lookup key for SNES games: (developer_id, internal_name_hex, rom_version, checksum)
 type snesKey struct {
-	DeveloperID  int
 	InternalName string
+	DeveloperID  int
 	ROMVersion   int
 	Checksum     int
 }
@@ -74,13 +92,13 @@ func NewDatabase() *GameDatabase {
 
 // LoadDatabase loads a database from a gob.gz file.
 func LoadDatabase(path string) (*GameDatabase, error) {
-	f, err := os.Open(path)
+	dbFile, err := os.Open(path) //nolint:gosec // Path from user input is expected
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = dbFile.Close() }()
 
-	return LoadDatabaseFromReader(f)
+	return LoadDatabaseFromReader(dbFile)
 }
 
 // LoadDatabaseFromReader loads a database from a gzip-compressed gob reader.
@@ -89,7 +107,7 @@ func LoadDatabaseFromReader(r io.Reader) (*GameDatabase, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gzip reader: %w", err)
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 
 	db := NewDatabase()
 	dec := gob.NewDecoder(gz)
@@ -102,14 +120,14 @@ func LoadDatabaseFromReader(r io.Reader) (*GameDatabase, error) {
 
 // SaveDatabase saves the database to a gob.gz file.
 func (db *GameDatabase) SaveDatabase(path string) error {
-	f, err := os.Create(path)
+	file, err := os.Create(path) //nolint:gosec // Path from user input is expected
 	if err != nil {
 		return fmt.Errorf("failed to create database file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = file.Close() }()
 
-	gz := gzip.NewWriter(f)
-	defer gz.Close()
+	gz := gzip.NewWriter(file)
+	defer func() { _ = gz.Close() }()
 
 	enc := gob.NewEncoder(gz)
 	if err := enc.Encode(db); err != nil {
@@ -120,7 +138,9 @@ func (db *GameDatabase) SaveDatabase(path string) error {
 }
 
 // Lookup retrieves metadata for a game by console and key.
-func (db *GameDatabase) Lookup(console identifier.Console, key interface{}) (map[string]string, bool) {
+//
+//nolint:exhaustive // Only some consoles use complex keys; others use LookupByString
+func (db *GameDatabase) Lookup(console identifier.Console, key any) (map[string]string, bool) {
 	switch console {
 	case identifier.ConsoleGB, identifier.ConsoleGBC:
 		if k, ok := key.(struct {
@@ -137,8 +157,8 @@ func (db *GameDatabase) Lookup(console identifier.Console, key interface{}) (map
 		}
 	case identifier.ConsoleSNES:
 		if k, ok := key.(struct {
-			developerID  int
 			internalName string
+			developerID  int
 			romVersion   int
 			checksum     int
 		}); ok {
@@ -172,10 +192,13 @@ func (db *GameDatabase) Lookup(console identifier.Console, key interface{}) (map
 			return entry, found
 		}
 	}
+
 	return nil, false
 }
 
 // LookupByString retrieves metadata using a string key.
+//
+//nolint:exhaustive // GB, GBC, NES, SNES use Lookup with complex keys, not LookupByString
 func (db *GameDatabase) LookupByString(console identifier.Console, key string) (map[string]string, bool) {
 	switch console {
 	case identifier.ConsoleGBA:
@@ -213,6 +236,7 @@ func (db *GameDatabase) LookupByString(console identifier.Console, key string) (
 			}
 		}
 	}
+
 	return nil, false
 }
 
