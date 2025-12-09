@@ -158,20 +158,20 @@ jobs:
 
     - name: Run fuzz tests (iso9660)
       run: |
-        go test -fuzz=FuzzISO9660Open -fuzztime=10s ./iso9660/
-        go test -fuzz=FuzzParseCue -fuzztime=10s ./iso9660/
+        go test -fuzz='^FuzzISO9660Open$' -fuzztime=10s ./iso9660/
+        go test -fuzz='^FuzzParseCue$' -fuzztime=10s ./iso9660/
 
     - name: Run fuzz tests (binary)
       run: |
-        go test -fuzz=FuzzFindBytes -fuzztime=10s ./internal/binary/
-        go test -fuzz=FuzzFindBytesInRange -fuzztime=10s ./internal/binary/
-        go test -fuzz=FuzzCleanString -fuzztime=10s ./internal/binary/
-        go test -fuzz=FuzzExtractPrintable -fuzztime=10s ./internal/binary/
-        go test -fuzz=FuzzBytesEqual -fuzztime=10s ./internal/binary/
+        go test -fuzz='^FuzzFindBytes$' -fuzztime=10s ./internal/binary/
+        go test -fuzz='^FuzzFindBytesInRange$' -fuzztime=10s ./internal/binary/
+        go test -fuzz='^FuzzCleanString$' -fuzztime=10s ./internal/binary/
+        go test -fuzz='^FuzzExtractPrintable$' -fuzztime=10s ./internal/binary/
+        go test -fuzz='^FuzzBytesEqual$' -fuzztime=10s ./internal/binary/
 
     - name: Run fuzz tests (identifier)
       run: |
-        go test -fuzz=FuzzSNESIdentify -fuzztime=10s ./identifier/
-        go test -fuzz=FuzzN64Identify -fuzztime=10s ./identifier/
-        go test -fuzz=FuzzGenesisIdentify -fuzztime=10s ./identifier/
-        go test -fuzz=FuzzGBIdentify -fuzztime=10s ./identifier/
+        go test -fuzz='^FuzzSNESIdentify$' -fuzztime=10s ./identifier/
+        go test -fuzz='^FuzzN64Identify$' -fuzztime=10s ./identifier/
+        go test -fuzz='^FuzzGenesisIdentify$' -fuzztime=10s ./identifier/
+        go test -fuzz='^FuzzGBIdentify$' -fuzztime=10s ./identifier/
