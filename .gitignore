@@ -11,9 +11,12 @@
 go.work
 go.work.sum
 
-.DS_Store
+**/.DS_Store
+
+cmd/gameid/gameid
 
 .idea/
 .vscode/
 .claude/
 CLAUDE.md
+tmp/

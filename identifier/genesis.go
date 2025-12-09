@@ -137,7 +137,8 @@ func genesisReadHeader(reader io.ReaderAt, size int64) (data []byte, magicWordIn
 // findGenesisMagicWord searches for a Genesis magic word in the data.
 func findGenesisMagicWord(data []byte) int {
 	for _, magicWord := range genesisMagicWords {
-		for i := 0x100; i <= 0x200-len(magicWord); i++ {
+		searchEnd := min(0x200-len(magicWord), len(data)-len(magicWord))
+		for i := 0x100; i <= searchEnd; i++ {
 			if bin.BytesEqual(data[i:i+len(magicWord)], magicWord) {
 				return i
 			}
