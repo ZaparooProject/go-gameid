@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            suffix: ''
+          - goos: linux
+            goarch: arm64
+            suffix: ''
+          - goos: darwin
+            goarch: amd64
+            suffix: ''
+          - goos: darwin
+            goarch: arm64
+            suffix: ''
+          - goos: windows
+            goarch: amd64
+            suffix: '.exe'
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: '1.24.x'
+
+    - name: Build gameid
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+      run: |
+        mkdir -p dist
+        go build -v -ldflags="-s -w" -o dist/gameid${{ matrix.suffix }} ./cmd/gameid
+
+    - name: Create zip
+      run: |
+        cd dist
+        zip gameid-${{ matrix.goos }}-${{ matrix.goarch }}.zip gameid${{ matrix.suffix }}
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: gameid-${{ matrix.goos }}-${{ matrix.goarch }}
+        path: dist/*.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v5
+      with:
+        path: artifacts
+        merge-multiple: true
+
+    - name: List artifacts
+      run: find artifacts -type f
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: artifacts/**/*.zip
+        generate_release_notes: true
