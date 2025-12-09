@@ -290,3 +290,235 @@ func TestDatabase_ImplementsInterface(_ *testing.T) {
 	// The actual implementation is tested in other tests
 	var _ identifier.Database = (*GameDatabase)(nil)
 }
+
+func TestDatabase_Lookup_GB(t *testing.T) {
+	t.Parallel()
+
+	db := NewDatabase()
+	// Add a GB entry with the gbKey struct
+	db.GB[gbKey{Title: "POKEMON RED", Checksum: 0x1234}] = map[string]string{
+		"title":  "Pokemon Red",
+		"region": "USA",
+	}
+
+	// Test lookup with anonymous struct (how identifiers call it)
+	key := struct {
+		title    string
+		checksum uint16
+	}{
+		title:    "POKEMON RED",
+		checksum: 0x1234,
+	}
+
+	entry, found := db.Lookup(identifier.ConsoleGB, key)
+	if !found {
+		t.Error("Lookup() did not find GB entry with struct key")
+	}
+	if entry["title"] != "Pokemon Red" {
+		t.Errorf("title = %q, want %q", entry["title"], "Pokemon Red")
+	}
+
+	// Test with GBC (should use same DB)
+	_, found = db.Lookup(identifier.ConsoleGBC, key)
+	if !found {
+		t.Error("Lookup() did not find GBC entry with struct key")
+	}
+
+	// Test not found
+	notFoundKey := struct {
+		title    string
+		checksum uint16
+	}{
+		title:    "UNKNOWN GAME",
+		checksum: 0xFFFF,
+	}
+	_, found = db.Lookup(identifier.ConsoleGB, notFoundKey)
+	if found {
+		t.Error("Lookup() should not find non-existent GB entry")
+	}
+}
+
+func TestDatabase_Lookup_SNES(t *testing.T) {
+	t.Parallel()
+
+	db := NewDatabase()
+	// Add a SNES entry with the snesKey struct
+	db.SNES[snesKey{
+		InternalName: "SUPER MARIO WORLD",
+		DeveloperID:  0x01,
+		ROMVersion:   0x00,
+		Checksum:     0xA0DA,
+	}] = map[string]string{
+		"title":  "Super Mario World",
+		"region": "USA",
+	}
+
+	// Test lookup with anonymous struct (how identifiers call it)
+	key := struct {
+		internalName string
+		developerID  int
+		romVersion   int
+		checksum     int
+	}{
+		internalName: "SUPER MARIO WORLD",
+		developerID:  0x01,
+		romVersion:   0x00,
+		checksum:     0xA0DA,
+	}
+
+	entry, found := db.Lookup(identifier.ConsoleSNES, key)
+	if !found {
+		t.Error("Lookup() did not find SNES entry with struct key")
+	}
+	if entry["title"] != "Super Mario World" {
+		t.Errorf("title = %q, want %q", entry["title"], "Super Mario World")
+	}
+
+	// Test not found
+	notFoundKey := struct {
+		internalName string
+		developerID  int
+		romVersion   int
+		checksum     int
+	}{
+		internalName: "UNKNOWN",
+		developerID:  0xFF,
+		romVersion:   0x00,
+		checksum:     0x0000,
+	}
+	_, found = db.Lookup(identifier.ConsoleSNES, notFoundKey)
+	if found {
+		t.Error("Lookup() should not find non-existent SNES entry")
+	}
+}
+
+func TestDatabase_Lookup_NeoGeoCD(t *testing.T) {
+	t.Parallel()
+
+	db := NewDatabase()
+	// Add a NeoGeoCD entry with the neogeoCDKey struct
+	db.NeoGeoCD[neogeoCDKey{
+		UUID:     "2024-01-01-00-00-00-00",
+		VolumeID: "BLAZING_STAR",
+	}] = map[string]string{
+		"title": "Blazing Star",
+	}
+
+	// Test lookup with anonymous struct (how identifiers call it)
+	key := struct {
+		uuid     string
+		volumeID string
+	}{
+		uuid:     "2024-01-01-00-00-00-00",
+		volumeID: "BLAZING_STAR",
+	}
+
+	entry, found := db.Lookup(identifier.ConsoleNeoGeoCD, key)
+	if !found {
+		t.Error("Lookup() did not find NeoGeoCD entry with struct key")
+	}
+	if entry["title"] != "Blazing Star" {
+		t.Errorf("title = %q, want %q", entry["title"], "Blazing Star")
+	}
+
+	// Test not found
+	notFoundKey := struct {
+		uuid     string
+		volumeID string
+	}{
+		uuid:     "unknown",
+		volumeID: "unknown",
+	}
+	_, found = db.Lookup(identifier.ConsoleNeoGeoCD, notFoundKey)
+	if found {
+		t.Error("Lookup() should not find non-existent NeoGeoCD entry")
+	}
+}
+
+func TestDatabase_LookupByString_NeoGeoCD_VolumeIDFallback(t *testing.T) {
+	t.Parallel()
+
+	db := NewDatabase()
+	// Add a NeoGeoCD entry
+	db.NeoGeoCD[neogeoCDKey{
+		UUID:     "2024-01-01-00-00-00-00",
+		VolumeID: "METAL_SLUG",
+	}] = map[string]string{
+		"title": "Metal Slug",
+	}
+
+	// LookupByString should find by VolumeID alone
+	entry, found := db.LookupByString(identifier.ConsoleNeoGeoCD, "METAL_SLUG")
+	if !found {
+		t.Error("LookupByString() did not find NeoGeoCD entry by volumeID")
+	}
+	if entry["title"] != "Metal Slug" {
+		t.Errorf("title = %q, want %q", entry["title"], "Metal Slug")
+	}
+
+	// Test not found
+	_, found = db.LookupByString(identifier.ConsoleNeoGeoCD, "UNKNOWN_VOL")
+	if found {
+		t.Error("LookupByString() should not find non-existent NeoGeoCD entry")
+	}
+}
+
+func TestDatabase_Lookup_InvalidKeyTypes(t *testing.T) {
+	t.Parallel()
+
+	db := NewDatabase()
+
+	// Test with wrong key type for each console
+	tests := []struct {
+		key     any
+		name    string
+		console identifier.Console
+	}{
+		{name: "GB with string key", console: identifier.ConsoleGB, key: "invalid"},
+		{name: "GBC with int key", console: identifier.ConsoleGBC, key: 12345},
+		{name: "SNES with string key", console: identifier.ConsoleSNES, key: "invalid"},
+		{name: "NES with string key", console: identifier.ConsoleNES, key: "invalid"},
+		{name: "NeoGeoCD with int key", console: identifier.ConsoleNeoGeoCD, key: 12345},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, found := db.Lookup(tt.console, tt.key)
+			if found {
+				t.Error("Lookup() should return false for invalid key type")
+			}
+		})
+	}
+}
+
+func TestDatabase_Lookup_UnsupportedConsole(t *testing.T) {
+	t.Parallel()
+
+	db := NewDatabase()
+
+	// Consoles that use LookupByString, not Lookup
+	unsupportedConsoles := []identifier.Console{
+		identifier.ConsoleGBA,
+		identifier.ConsoleGC,
+		identifier.ConsoleGenesis,
+		identifier.ConsoleN64,
+		identifier.ConsolePSP,
+		identifier.ConsolePSX,
+		identifier.ConsolePS2,
+		identifier.ConsoleSaturn,
+		identifier.ConsoleSegaCD,
+	}
+
+	for _, console := range unsupportedConsoles {
+		t.Run(string(console), func(t *testing.T) {
+			t.Parallel()
+
+			_, found := db.Lookup(console, "any_key")
+			if found {
+				t.Errorf("Lookup() should return false for %s (uses LookupByString)", console)
+			}
+		})
+	}
+}

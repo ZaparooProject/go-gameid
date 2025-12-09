@@ -19,6 +19,7 @@
 package gameid
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -172,5 +173,267 @@ func TestDetectConsole_NonExistent(t *testing.T) {
 	_, err := DetectConsole("/nonexistent/path/game.gba")
 	if err == nil {
 		t.Error("DetectConsole() should error for non-existent file")
+	}
+}
+
+func TestDetectConsoleFromHeader_GameCube(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "game.bin")
+
+	// GameCube magic is 0xC2339F3D at offset 0x1C
+	header := make([]byte, 0x100)
+	header[0x1C] = 0xC2
+	header[0x1D] = 0x33
+	header[0x1E] = 0x9F
+	header[0x1F] = 0x3D
+
+	if err := os.WriteFile(path, header, 0o600); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	console, err := DetectConsole(path)
+	if err != nil {
+		t.Fatalf("DetectConsole() error = %v", err)
+	}
+	if console != identifier.ConsoleGC {
+		t.Errorf("DetectConsole() = %v, want %v", console, identifier.ConsoleGC)
+	}
+}
+
+func TestDetectConsoleFromHeader_Saturn(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "game.bin")
+
+	// Saturn magic is "SEGA SEGASATURN"
+	header := make([]byte, 0x100)
+	copy(header, "SEGA SEGASATURN")
+
+	if err := os.WriteFile(path, header, 0o600); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	console, err := DetectConsole(path)
+	if err != nil {
+		t.Fatalf("DetectConsole() error = %v", err)
+	}
+	if console != identifier.ConsoleSaturn {
+		t.Errorf("DetectConsole() = %v, want %v", console, identifier.ConsoleSaturn)
+	}
+}
+
+func TestDetectConsoleFromHeader_SegaCD(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		magic string
+	}{
+		{"SEGADISCSYSTEM", "SEGADISCSYSTEM"},
+		{"SEGABOOTDISC", "SEGABOOTDISC"},
+		{"SEGADISC", "SEGADISC"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tmpDir := t.TempDir()
+			path := filepath.Join(tmpDir, "game.bin")
+
+			header := make([]byte, 0x100)
+			copy(header, tt.magic)
+
+			if err := os.WriteFile(path, header, 0o600); err != nil {
+				t.Fatalf("Failed to write test file: %v", err)
+			}
+
+			console, err := DetectConsole(path)
+			if err != nil {
+				t.Fatalf("DetectConsole() error = %v", err)
+			}
+			if console != identifier.ConsoleSegaCD {
+				t.Errorf("DetectConsole() = %v, want %v", console, identifier.ConsoleSegaCD)
+			}
+		})
+	}
+}
+
+func TestDetectConsoleFromHeader_Genesis(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		magic string
+	}{
+		{"SEGA GENESIS", "SEGA GENESIS"},
+		{"SEGA MEGA DRIVE", "SEGA MEGA DRIVE"},
+		{"SEGA 32X", "SEGA 32X"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tmpDir := t.TempDir()
+			path := filepath.Join(tmpDir, "game.bin")
+
+			// Genesis magic is at offset 0x100-0x200
+			header := make([]byte, 0x200)
+			copy(header[0x100:], tt.magic)
+
+			if err := os.WriteFile(path, header, 0o600); err != nil {
+				t.Fatalf("Failed to write test file: %v", err)
+			}
+
+			console, err := DetectConsole(path)
+			if err != nil {
+				t.Fatalf("DetectConsole() error = %v", err)
+			}
+			if console != identifier.ConsoleGenesis {
+				t.Errorf("DetectConsole() = %v, want %v", console, identifier.ConsoleGenesis)
+			}
+		})
+	}
+}
+
+func TestDetectConsoleFromDirectory_PSP(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Create UMD_DATA.BIN marker file
+	if err := os.WriteFile(filepath.Join(tmpDir, "UMD_DATA.BIN"), []byte("test"), 0o600); err != nil {
+		t.Fatalf("Failed to create marker file: %v", err)
+	}
+
+	console, err := DetectConsole(tmpDir)
+	if err != nil {
+		t.Fatalf("DetectConsole() error = %v", err)
+	}
+	if console != identifier.ConsolePSP {
+		t.Errorf("DetectConsole() = %v, want %v", console, identifier.ConsolePSP)
+	}
+}
+
+func TestDetectConsoleFromDirectory_NeoGeoCD(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Create IPL.TXT marker file
+	if err := os.WriteFile(filepath.Join(tmpDir, "IPL.TXT"), []byte("test"), 0o600); err != nil {
+		t.Fatalf("Failed to create marker file: %v", err)
+	}
+
+	console, err := DetectConsole(tmpDir)
+	if err != nil {
+		t.Fatalf("DetectConsole() error = %v", err)
+	}
+	if console != identifier.ConsoleNeoGeoCD {
+		t.Errorf("DetectConsole() = %v, want %v", console, identifier.ConsoleNeoGeoCD)
+	}
+}
+
+func TestDetectConsoleFromDirectory_PSX(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Create SYSTEM.CNF with BOOT (PSX marker)
+	if err := os.WriteFile(filepath.Join(tmpDir, "SYSTEM.CNF"), []byte("BOOT=cdrom:\\GAME.EXE"), 0o600); err != nil {
+		t.Fatalf("Failed to create marker file: %v", err)
+	}
+
+	console, err := DetectConsole(tmpDir)
+	if err != nil {
+		t.Fatalf("DetectConsole() error = %v", err)
+	}
+	if console != identifier.ConsolePSX {
+		t.Errorf("DetectConsole() = %v, want %v", console, identifier.ConsolePSX)
+	}
+}
+
+func TestDetectConsoleFromDirectory_PS2(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Create SYSTEM.CNF with BOOT2 (PS2 marker)
+	if err := os.WriteFile(filepath.Join(tmpDir, "SYSTEM.CNF"), []byte("BOOT2=cdrom0:\\GAME.ELF"), 0o600); err != nil {
+		t.Fatalf("Failed to create marker file: %v", err)
+	}
+
+	console, err := DetectConsole(tmpDir)
+	if err != nil {
+		t.Fatalf("DetectConsole() error = %v", err)
+	}
+	if console != identifier.ConsolePS2 {
+		t.Errorf("DetectConsole() = %v, want %v", console, identifier.ConsolePS2)
+	}
+}
+
+func TestDetectConsoleFromDirectory_Unsupported(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Empty directory should fail
+	_, err := DetectConsole(tmpDir)
+	if err == nil {
+		t.Error("DetectConsole() should error for unsupported directory")
+	}
+
+	var notSupported identifier.ErrNotSupported
+	if !errors.As(err, &notSupported) {
+		t.Errorf("Expected ErrNotSupported, got %T: %v", err, err)
+	}
+}
+
+func TestDetectConsoleFromHeader_AmbiguousISO(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "game.iso")
+
+	// File with no recognizable magic bytes and not valid ISO
+	header := make([]byte, 0x1000)
+	if err := os.WriteFile(path, header, 0o600); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	_, err := DetectConsole(path)
+	// Should error because it's not a valid ISO and no magic detected
+	if err == nil {
+		t.Error("DetectConsole() should error for invalid ISO without magic")
+	}
+}
+
+func TestFileExists(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Test existing file
+	existingPath := filepath.Join(tmpDir, "existing.txt")
+	if err := os.WriteFile(existingPath, []byte("test"), 0o600); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	if !fileExists(existingPath) {
+		t.Error("fileExists() = false for existing file")
+	}
+
+	// Test non-existent file
+	if fileExists(filepath.Join(tmpDir, "nonexistent.txt")) {
+		t.Error("fileExists() = true for non-existent file")
+	}
+
+	// Test directory (should return false - not a file)
+	if fileExists(tmpDir) {
+		t.Error("fileExists() = true for directory")
 	}
 }

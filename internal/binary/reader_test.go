@@ -23,6 +23,41 @@ import (
 	"testing"
 )
 
+func TestReadUint8At(t *testing.T) {
+	t.Parallel()
+
+	data := []byte{0x00, 0x42, 0xFF, 0x80}
+	reader := bytes.NewReader(data)
+
+	tests := []struct {
+		name    string
+		offset  int64
+		want    uint8
+		wantErr bool
+	}{
+		{"first byte (0x00)", 0, 0x00, false},
+		{"second byte (0x42)", 1, 0x42, false},
+		{"third byte (0xFF)", 2, 0xFF, false},
+		{"fourth byte (0x80)", 3, 0x80, false},
+		{"past end", 4, 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := ReadUint8At(reader, tt.offset)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ReadUint8At() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("ReadUint8At() = 0x%02X, want 0x%02X", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestReadBytesAt(t *testing.T) {
 	t.Parallel()
 
@@ -184,6 +219,43 @@ func TestReadStringAt(t *testing.T) {
 			}
 			if got != testCase.want {
 				t.Errorf("ReadStringAt() = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}
+
+func TestReadPrintableStringAt(t *testing.T) {
+	t.Parallel()
+
+	// Create test data with mixed printable and non-printable characters
+	data := []byte("Hello\x01World\x00Test\x80More")
+	reader := bytes.NewReader(data)
+
+	tests := []struct {
+		name    string
+		want    string
+		offset  int64
+		length  int
+		wantErr bool
+	}{
+		{name: "all printable", offset: 0, length: 5, want: "Hello", wantErr: false},
+		{name: "with control char", offset: 0, length: 11, want: "HelloWorld", wantErr: false},
+		{name: "with null", offset: 0, length: 16, want: "HelloWorldTest", wantErr: false},
+		{name: "from middle", offset: 6, length: 5, want: "World", wantErr: false},
+		{name: "past end", offset: 100, length: 5, want: "", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := ReadPrintableStringAt(reader, tt.offset, tt.length)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ReadPrintableStringAt() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("ReadPrintableStringAt() = %q, want %q", got, tt.want)
 			}
 		})
 	}

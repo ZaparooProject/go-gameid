@@ -20,6 +20,7 @@ package identifier
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -250,5 +251,148 @@ func TestValidateSNES(t *testing.T) {
 				t.Errorf("ValidateSNES() = %v, want %v", got, testCase.want)
 			}
 		})
+	}
+}
+
+func TestSNESGetCoprocessor(t *testing.T) {
+	t.Parallel()
+
+	// Need a ROM big enough to access headerStart-1 for extended coprocessor tests
+	rom := make([]byte, 0x10000)
+	headerStart := snesLoROMHeaderStart
+
+	tests := []struct {
+		name       string
+		wantResult string
+		mapMode    byte
+		prevByte   byte
+	}{
+		{name: "DSP (chip 0)", mapMode: 0x00, prevByte: 0, wantResult: "DSP"},
+		{name: "Super FX (chip 1)", mapMode: 0x10, prevByte: 0, wantResult: "Super FX"},
+		{name: "OBC1 (chip 2)", mapMode: 0x20, prevByte: 0, wantResult: "OBC1"},
+		{name: "SA-1 (chip 3)", mapMode: 0x30, prevByte: 0, wantResult: "SA-1"},
+		{name: "S-DD1 (chip 4)", mapMode: 0x40, prevByte: 0, wantResult: "S-DD1"},
+		{name: "S-RTC (chip 5)", mapMode: 0x50, prevByte: 0, wantResult: "S-RTC"},
+		{name: "SGB/Satellaview (chip E)", mapMode: 0xE0, prevByte: 0, wantResult: "Super Game Boy / Satellaview"},
+		{name: "Extended SPC7110 (chip F, ext 0)", mapMode: 0xF0, prevByte: 0x00, wantResult: "SPC7110"},
+		{name: "Extended ST010/ST011 (chip F, ext 1)", mapMode: 0xF0, prevByte: 0x01, wantResult: "ST010 / ST011"},
+		{name: "Extended ST018 (chip F, ext 2)", mapMode: 0xF0, prevByte: 0x02, wantResult: "ST018"},
+		{name: "Extended CX4 (chip F, ext 3)", mapMode: 0xF0, prevByte: 0x03, wantResult: "CX4"},
+		{name: "Extended unknown (chip F, ext 4)", mapMode: 0xF0, prevByte: 0x04, wantResult: ""},
+		{name: "Unknown chip type (chip 6)", mapMode: 0x60, prevByte: 0, wantResult: ""},
+		{name: "Unknown chip type (chip 7)", mapMode: 0x70, prevByte: 0, wantResult: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Copy rom to avoid race conditions
+			testRom := make([]byte, len(rom))
+			copy(testRom, rom)
+
+			// Set the byte before header for extended coprocessor tests
+			if tt.mapMode&0xF0 == 0xF0 && headerStart > 0 {
+				testRom[headerStart-1] = tt.prevByte
+			}
+
+			result := snesGetCoprocessor(tt.mapMode, testRom, headerStart)
+			if result != tt.wantResult {
+				t.Errorf("snesGetCoprocessor(0x%02X) = %q, want %q", tt.mapMode, result, tt.wantResult)
+			}
+		})
+	}
+}
+
+func TestSNESGetExtendedCoprocessor(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		wantResult  string
+		headerStart int
+		prevByte    byte
+	}{
+		{name: "SPC7110 (ext 0)", headerStart: snesLoROMHeaderStart, prevByte: 0x00, wantResult: "SPC7110"},
+		{name: "ST010/ST011 (ext 1)", headerStart: snesLoROMHeaderStart, prevByte: 0x01, wantResult: "ST010 / ST011"},
+		{name: "ST018 (ext 2)", headerStart: snesLoROMHeaderStart, prevByte: 0x02, wantResult: "ST018"},
+		{name: "CX4 (ext 3)", headerStart: snesLoROMHeaderStart, prevByte: 0x03, wantResult: "CX4"},
+		{name: "Unknown (ext 4)", headerStart: snesLoROMHeaderStart, prevByte: 0x04, wantResult: ""},
+		{name: "Unknown (ext 0xF)", headerStart: snesLoROMHeaderStart, prevByte: 0x0F, wantResult: ""},
+		{name: "Header at 0 (invalid)", headerStart: 0, prevByte: 0x00, wantResult: ""},
+		{name: "Header at -1 (invalid)", headerStart: -1, prevByte: 0x00, wantResult: ""},
+		{name: "High nibble mask (ext 0x10)", headerStart: snesLoROMHeaderStart, prevByte: 0x10, wantResult: "SPC7110"},
+		{name: "High nibble mask (ext 0xF3 = 3)", headerStart: snesLoROMHeaderStart, prevByte: 0xF3, wantResult: "CX4"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			rom := make([]byte, 0x10000)
+			if tt.headerStart > 0 && tt.headerStart <= len(rom) {
+				rom[tt.headerStart-1] = tt.prevByte
+			}
+
+			result := snesGetExtendedCoprocessor(rom, tt.headerStart)
+			if result != tt.wantResult {
+				t.Errorf("snesGetExtendedCoprocessor() = %q, want %q", result, tt.wantResult)
+			}
+		})
+	}
+}
+
+func TestSNESIdentifier_WithCoprocessor(t *testing.T) {
+	t.Parallel()
+
+	identifier := NewSNESIdentifier()
+
+	// Create a ROM with a coprocessor chip type
+	rom := createSNESHeader("STARFOX", 0x01, 0, 0x1234)
+	headerStart := snesLoROMHeaderStart
+
+	// Set ROM type to 3 (ROM + Coprocessor) to enable coprocessor detection
+	rom[headerStart+snesROMTypeOffset] = 0x03
+
+	// Set map mode to include Super FX chip (0x10 in high nibble)
+	// Also set low bits for LoROM (0x00)
+	rom[headerStart+snesMapModeOffset] = 0x10
+
+	reader := bytes.NewReader(rom)
+
+	result, err := identifier.Identify(reader, int64(len(rom)), nil)
+	if err != nil {
+		t.Fatalf("Identify() error = %v", err)
+	}
+
+	// Verify coprocessor is included in hardware description
+	hardware := result.Metadata["hardware"]
+	if !strings.Contains(hardware, "Super FX") {
+		t.Errorf("hardware = %q, want it to contain %q", hardware, "Super FX")
+	}
+}
+
+func TestSNESIdentifier_TooSmall(t *testing.T) {
+	t.Parallel()
+
+	identifier := NewSNESIdentifier()
+
+	// Create a ROM that's too small
+	rom := make([]byte, 100)
+
+	reader := bytes.NewReader(rom)
+
+	_, err := identifier.Identify(reader, int64(len(rom)), nil)
+	if err == nil {
+		t.Error("expected error for too small ROM, got nil")
+	}
+}
+
+func TestSNESIdentifier_Console(t *testing.T) {
+	t.Parallel()
+
+	identifier := NewSNESIdentifier()
+	if identifier.Console() != ConsoleSNES {
+		t.Errorf("Console() = %v, want %v", identifier.Console(), ConsoleSNES)
 	}
 }
