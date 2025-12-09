@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"syscall"
 
 	"github.com/ZaparooProject/go-gameid/identifier"
 )
@@ -259,25 +258,6 @@ func IsDiscBased(console Console) bool {
 // IsCartridgeBased returns true if the console uses cartridge-based media.
 func IsCartridgeBased(console Console) bool {
 	return !IsDiscBased(console)
-}
-
-// isBlockDevice checks if the given path is a block device (e.g., /dev/sr0).
-func isBlockDevice(path string) bool {
-	// On Linux, block devices are typically in /dev/
-	if !strings.HasPrefix(path, "/dev/") {
-		return false
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	// Check if it's a block device using syscall
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return false
-	}
-	// S_IFBLK = block device (0x6000 = 0o60000)
-	return stat.Mode&syscall.S_IFMT == syscall.S_IFBLK
 }
 
 // identifyFromBlockDevice identifies a game from a physical disc (block device).
