@@ -1,3 +1,3 @@
 module github.com/ZaparooProject/go-gameid
 
-go 1.24
+go 1.24.11

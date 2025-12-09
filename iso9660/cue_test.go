@@ -161,8 +161,20 @@ func TestParseCue_AbsolutePaths(t *testing.T) {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
+	// Create a platform-appropriate absolute path for testing
+	// On Windows, use the temp directory as the base for an absolute path
+	// On Unix, use a typical Unix absolute path
+	var absPath string
+	if filepath.Separator == '\\' {
+		// Windows: use tmpDir as an absolute path base
+		absPath = filepath.Join(tmpDir, "absolute", "path", "game.bin")
+	} else {
+		// Unix: use a Unix-style absolute path
+		absPath = "/absolute/path/game.bin"
+	}
+
 	// CUE with absolute path
-	cueContent := `FILE "/absolute/path/game.bin" BINARY
+	cueContent := `FILE "` + absPath + `" BINARY
 TRACK 01 MODE1/2352
   INDEX 01 00:00:00`
 
@@ -181,7 +193,7 @@ TRACK 01 MODE1/2352
 	}
 
 	// Absolute paths should be preserved
-	if cue.BinFiles[0] != "/absolute/path/game.bin" {
-		t.Errorf("BinFiles[0] = %q, want %q", cue.BinFiles[0], "/absolute/path/game.bin")
+	if cue.BinFiles[0] != absPath {
+		t.Errorf("BinFiles[0] = %q, want %q", cue.BinFiles[0], absPath)
 	}
 }
