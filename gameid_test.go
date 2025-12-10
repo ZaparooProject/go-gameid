@@ -424,3 +424,105 @@ func TestIdentifyFromDirectory_UnsupportedConsole(t *testing.T) {
 		t.Error("identifyFromDirectory() should error for unsupported console")
 	}
 }
+
+// TestIdentifyFromArchive_ZIP verifies identification from ZIP archives.
+func TestIdentifyFromArchive_ZIP(t *testing.T) {
+	t.Parallel()
+
+	result, err := Identify("testdata/archive/snes.zip", nil)
+	if err != nil {
+		t.Fatalf("Identify() error = %v", err)
+	}
+
+	if result.Console != identifier.ConsoleSNES {
+		t.Errorf("Console = %v, want %v", result.Console, identifier.ConsoleSNES)
+	}
+
+	if result.InternalTitle != "240P TEST SUITE SNES" {
+		t.Errorf("InternalTitle = %q, want %q", result.InternalTitle, "240P TEST SUITE SNES")
+	}
+}
+
+// TestIdentifyFromArchive_7z verifies identification from 7z archives.
+func TestIdentifyFromArchive_7z(t *testing.T) {
+	t.Parallel()
+
+	result, err := Identify("testdata/archive/snes.7z", nil)
+	if err != nil {
+		t.Fatalf("Identify() error = %v", err)
+	}
+
+	if result.Console != identifier.ConsoleSNES {
+		t.Errorf("Console = %v, want %v", result.Console, identifier.ConsoleSNES)
+	}
+
+	if result.InternalTitle != "240P TEST SUITE SNES" {
+		t.Errorf("InternalTitle = %q, want %q", result.InternalTitle, "240P TEST SUITE SNES")
+	}
+}
+
+// TestIdentifyFromArchive_RAR verifies identification from RAR archives.
+func TestIdentifyFromArchive_RAR(t *testing.T) {
+	t.Parallel()
+
+	result, err := Identify("testdata/archive/snes.rar", nil)
+	if err != nil {
+		t.Fatalf("Identify() error = %v", err)
+	}
+
+	if result.Console != identifier.ConsoleSNES {
+		t.Errorf("Console = %v, want %v", result.Console, identifier.ConsoleSNES)
+	}
+
+	if result.InternalTitle != "240P TEST SUITE SNES" {
+		t.Errorf("InternalTitle = %q, want %q", result.InternalTitle, "240P TEST SUITE SNES")
+	}
+}
+
+// TestIdentifyFromArchive_Genesis verifies identification of Genesis ROMs from archives.
+func TestIdentifyFromArchive_Genesis(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{"ZIP", "testdata/archive/genesis.zip"},
+		{"7z", "testdata/archive/genesis.7z"},
+		{"RAR", "testdata/archive/genesis.rar"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := Identify(tt.path, nil)
+			if err != nil {
+				t.Fatalf("Identify() error = %v", err)
+			}
+
+			if result.Console != identifier.ConsoleGenesis {
+				t.Errorf("Console = %v, want %v", result.Console, identifier.ConsoleGenesis)
+			}
+
+			if result.InternalTitle != "240P TEST SUITE" {
+				t.Errorf("InternalTitle = %q, want %q", result.InternalTitle, "240P TEST SUITE")
+			}
+		})
+	}
+}
+
+// TestIdentifyFromArchive_WithInternalPath verifies MiSTer-style paths work.
+func TestIdentifyFromArchive_WithInternalPath(t *testing.T) {
+	t.Parallel()
+
+	// Test explicit internal path
+	result, err := Identify("testdata/archive/snes.zip/240pSuite.sfc", nil)
+	if err != nil {
+		t.Fatalf("Identify() error = %v", err)
+	}
+
+	if result.Console != identifier.ConsoleSNES {
+		t.Errorf("Console = %v, want %v", result.Console, identifier.ConsoleSNES)
+	}
+}
