@@ -545,3 +545,40 @@ func TestGetDataPreparerID(t *testing.T) {
 	// Data preparer ID is at a different offset - our minimal ISO doesn't set it
 	_ = iso.GetDataPreparerID()
 }
+
+// TestISO9660_TruncatedPathTable verifies bounds check for malformed path table entries.
+func TestISO9660_TruncatedPathTable(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Create a minimal ISO
+	isoData := createMinimalISO("VOL", "SYS", "PUB")
+
+	// Corrupt the path table: set a directory name length that exceeds the path table size
+	// Path table is at block 18 (offset 18 * 2048 = 36864)
+	pathTableOffset := 18 * 2048
+
+	// Set directory name length to a large value (e.g., 100) that exceeds remaining data
+	// The path table entry format is:
+	// - byte 0: directory name length
+	// - byte 1: extended attribute record length
+	// - bytes 2-5: directory LBA (little-endian)
+	// - bytes 6-7: parent directory number (little-endian)
+	// - bytes 8+: directory name
+	isoData[pathTableOffset] = 100 // Large name length that would overflow
+
+	isoPath := filepath.Join(tmpDir, "truncated.iso")
+	if err := os.WriteFile(isoPath, isoData, 0o600); err != nil {
+		t.Fatalf("Failed to write ISO: %v", err)
+	}
+
+	// This should fail with a truncated path table error, not panic
+	_, err := Open(isoPath)
+	if err == nil {
+		t.Error("Open() should error for truncated path table entry")
+	}
+	if !strings.Contains(err.Error(), "truncated path table entry") {
+		t.Errorf("Open() error = %v, want error containing 'truncated path table entry'", err)
+	}
+}

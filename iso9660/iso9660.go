@@ -198,13 +198,14 @@ func (iso *ISO9660) parsePathTable() error {
 	iso.pathTable = nil
 	i := 0
 	for i < len(pathTableRaw) {
-		if i >= len(pathTableRaw) {
-			break
-		}
-
 		dirNameLen := int(pathTableRaw[i])
 		if dirNameLen == 0 {
 			break
+		}
+
+		// Validate we have enough data for this entry (8 byte header + name)
+		if i+8+dirNameLen > len(pathTableRaw) {
+			return fmt.Errorf("truncated path table entry at offset %d", i)
 		}
 
 		// Extended attribute record length at i+1 (skip)
