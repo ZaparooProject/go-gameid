@@ -26,6 +26,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ZaparooProject/go-gameid/archive"
 	"github.com/ZaparooProject/go-gameid/identifier"
 )
 
@@ -82,7 +83,23 @@ type pathIdentifier interface {
 // Identify detects the console type and identifies the game at the given path.
 // It returns the identification result or an error if identification fails.
 // If db is nil, no database lookup is performed.
+//
+// Archive paths are supported in two forms:
+//   - Explicit: /path/to/archive.zip/internal/path/game.gba
+//   - Auto-detect: /path/to/archive.zip (finds first game file by extension)
+//
+// Supported archive formats: ZIP, 7z, RAR.
+// Only cartridge-based games (GB, GBC, GBA, NES, SNES, N64, Genesis) are supported in archives.
 func Identify(path string, db *GameDatabase) (*Result, error) {
+	// Check if path references an archive
+	archivePath, err := archive.ParsePath(path)
+	if err != nil {
+		return nil, fmt.Errorf("parse archive path: %w", err)
+	}
+	if archivePath != nil {
+		return identifyFromArchive(archivePath, db)
+	}
+
 	console, err := DetectConsole(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to detect console: %w", err)
@@ -286,6 +303,101 @@ func identifyFromBlockDevice(path string, _ Console, ident identifier.Identifier
 	size := int64(700 * 1024 * 1024) // 700MB typical CD size
 
 	result, err := ident.Identify(blockDev, size, database)
+	if err != nil {
+		return nil, fmt.Errorf("identify: %w", err)
+	}
+	return result, nil
+}
+
+// identifyFromArchive identifies a game file inside an archive.
+func identifyFromArchive(archivePath *archive.Path, db *GameDatabase) (*Result, error) {
+	// Open the archive
+	arc, err := archive.Open(archivePath.ArchivePath)
+	if err != nil {
+		return nil, fmt.Errorf("open archive: %w", err)
+	}
+	defer func() { _ = arc.Close() }()
+
+	// Determine internal path (auto-detect if not specified)
+	internalPath := archivePath.InternalPath
+	if internalPath == "" {
+		detected, detectErr := archive.DetectGameFile(arc)
+		if detectErr != nil {
+			return nil, fmt.Errorf("detect game file in archive: %w", detectErr)
+		}
+		internalPath = detected
+	}
+
+	// Detect console from the internal file's extension
+	console, err := DetectConsoleFromExtension(internalPath)
+	if err != nil {
+		return nil, fmt.Errorf("detect console from archive file: %w", err)
+	}
+
+	// Only cartridge-based games are supported in archives
+	if !IsCartridgeBased(console) {
+		return nil, archive.DiscNotSupportedError{Console: string(console)}
+	}
+
+	// Get the identifier for this console
+	id, ok := identifiers[console]
+	if !ok {
+		return nil, identifier.ErrNotSupported{Format: string(console)}
+	}
+
+	// Convert database to interface (nil-safe)
+	var dbInterface identifier.Database
+	if db != nil {
+		dbInterface = db
+	}
+
+	// Open the file as ReaderAt (buffered in memory)
+	reader, size, closer, err := arc.OpenReaderAt(internalPath)
+	if err != nil {
+		return nil, fmt.Errorf("open file in archive: %w", err)
+	}
+	defer func() { _ = closer.Close() }()
+
+	// Identify the game
+	result, err := id.Identify(reader, size, dbInterface)
+	if err != nil {
+		return nil, fmt.Errorf("identify: %w", err)
+	}
+	return result, nil
+}
+
+// IdentifyFromArchive identifies a game from an already-opened archive.
+// This is useful when you need to control archive lifecycle or identify multiple files.
+//
+//nolint:revive // Exported function using internal type is intentional for advanced usage
+func IdentifyFromArchive(
+	arc archive.Archive,
+	internalPath string,
+	console Console,
+	db *GameDatabase,
+) (*Result, error) {
+	// Only cartridge-based games are supported
+	if !IsCartridgeBased(console) {
+		return nil, archive.DiscNotSupportedError{Console: string(console)}
+	}
+
+	id, ok := identifiers[console]
+	if !ok {
+		return nil, identifier.ErrNotSupported{Format: string(console)}
+	}
+
+	var dbInterface identifier.Database
+	if db != nil {
+		dbInterface = db
+	}
+
+	reader, size, closer, err := arc.OpenReaderAt(internalPath)
+	if err != nil {
+		return nil, fmt.Errorf("open file in archive: %w", err)
+	}
+	defer func() { _ = closer.Close() }()
+
+	result, err := id.Identify(reader, size, dbInterface)
 	if err != nil {
 		return nil, fmt.Errorf("identify: %w", err)
 	}

@@ -117,6 +117,33 @@ func DetectConsole(path string) (identifier.Console, error) {
 	return "", identifier.ErrNotSupported{Format: ext}
 }
 
+// DetectConsoleFromExtension detects the console type based purely on file extension.
+// Unlike DetectConsole, this does not read file headers or check file existence.
+// It returns an error for ambiguous extensions (like .bin, .iso) that require header analysis.
+func DetectConsoleFromExtension(path string) (identifier.Console, error) {
+	ext := strings.ToLower(filepath.Ext(path))
+
+	// Strip .gz suffix
+	if ext == ".gz" {
+		path = strings.TrimSuffix(path, ext)
+		ext = strings.ToLower(filepath.Ext(path))
+	}
+
+	// Check for unambiguous extension
+	if console, ok := extToConsole[ext]; ok {
+		return console, nil
+	}
+
+	// Ambiguous extensions cannot be detected without header analysis
+	if ambiguousExts[ext] {
+		return "", identifier.ErrNotSupported{
+			Format: fmt.Sprintf("ambiguous extension %s requires header analysis", ext),
+		}
+	}
+
+	return "", identifier.ErrNotSupported{Format: ext}
+}
+
 // detectConsoleFromDirectory detects console from a mounted disc directory
 func detectConsoleFromDirectory(path string) (identifier.Console, error) {
 	// Check for PSP (UMD_DATA.BIN)

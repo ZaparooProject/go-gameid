@@ -35,6 +35,14 @@ go-gameid/
 ├── gameid.go           # Main API: Identify(), IdentifyWithConsole(), DetectConsole()
 ├── console.go          # Console detection from file extensions/headers
 ├── database.go         # GameDatabase for metadata lookup (gob.gz format)
+├── archive/            # Archive support (ZIP, 7z, RAR)
+│   ├── archive.go      # Archive interface and factory
+│   ├── zip.go          # ZIP implementation
+│   ├── sevenzip.go     # 7z implementation
+│   ├── rar.go          # RAR implementation
+│   ├── path.go         # MiSTer-style path parsing
+│   ├── detect.go       # Game file detection
+│   └── errors.go       # Error types
 ├── identifier/         # Console-specific identification logic
 │   ├── identifier.go   # Identifier interface, Result type, Console constants
 │   ├── gb.go           # Game Boy / Game Boy Color
@@ -256,6 +264,41 @@ if gameid.IsDiscBased(console) {
 }
 ```
 
+### Identify game from archive
+
+The library supports MiSTer-style archive paths for cartridge-based games:
+
+```go
+// Explicit path inside archive
+result, err := gameid.Identify("/games/roms.zip/gba/game.gba", nil)
+
+// Auto-detect game file in archive
+result, err := gameid.Identify("/games/roms.7z", nil)
+
+// Also works with RAR
+result, err := gameid.Identify("/games/collection.rar/game.nes", nil)
+```
+
+### Work with archives directly
+
+```go
+import "github.com/ZaparooProject/go-gameid/archive"
+
+// Parse MiSTer-style path
+path, err := archive.ParsePath("/games/roms.zip/game.gba")
+// path.ArchivePath = "/games/roms.zip"
+// path.InternalPath = "game.gba"
+
+// Open and list archive contents
+arc, err := archive.Open("/games/roms.zip")
+defer arc.Close()
+files, err := arc.List()
+
+// Read file from archive
+reader, size, err := arc.Open("game.gba")
+defer reader.Close()
+```
+
 ## Platform-Specific Code
 
 Block device detection has platform-specific implementations:
@@ -264,7 +307,9 @@ Block device detection has platform-specific implementations:
 
 ## Dependencies
 
-The project has zero external dependencies (stdlib only).
+Production dependencies:
+- `github.com/bodgit/sevenzip` - 7z archive support (BSD-3-Clause)
+- `github.com/nwaples/rardecode/v2` - RAR archive support (BSD-2-Clause)
 
 ## Debugging Tips
 
@@ -282,3 +327,5 @@ The project has zero external dependencies (stdlib only).
 - GBC uses the same identifier as GB (header format is identical)
 - Some disc formats (.bin, .iso, .cue) are ambiguous - detection relies on header magic and filesystem analysis
 - Block device support allows reading directly from physical disc drives
+- Archive support (ZIP, 7z, RAR) only works for cartridge-based games - disc images in archives return an error
+- Archive paths use MiSTer-style format: `/path/to/archive.zip/internal/path/game.gba`

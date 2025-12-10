@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ZaparooProject/go-gameid/archive"
 	"github.com/ZaparooProject/go-gameid/identifier"
 )
 
@@ -422,5 +423,233 @@ func TestIdentifyFromDirectory_UnsupportedConsole(t *testing.T) {
 	_, err := identifyFromDirectory(tmpDir, "Xbox", nil)
 	if err == nil {
 		t.Error("identifyFromDirectory() should error for unsupported console")
+	}
+}
+
+// TestIdentifyFromArchive_ZIP verifies identification from ZIP archives.
+func TestIdentifyFromArchive_ZIP(t *testing.T) {
+	t.Parallel()
+
+	result, err := Identify("testdata/archive/snes.zip", nil)
+	if err != nil {
+		t.Fatalf("Identify() error = %v", err)
+	}
+
+	if result.Console != identifier.ConsoleSNES {
+		t.Errorf("Console = %v, want %v", result.Console, identifier.ConsoleSNES)
+	}
+
+	if result.InternalTitle != "240P TEST SUITE SNES" {
+		t.Errorf("InternalTitle = %q, want %q", result.InternalTitle, "240P TEST SUITE SNES")
+	}
+}
+
+// TestIdentifyFromArchive_7z verifies identification from 7z archives.
+func TestIdentifyFromArchive_7z(t *testing.T) {
+	t.Parallel()
+
+	result, err := Identify("testdata/archive/snes.7z", nil)
+	if err != nil {
+		t.Fatalf("Identify() error = %v", err)
+	}
+
+	if result.Console != identifier.ConsoleSNES {
+		t.Errorf("Console = %v, want %v", result.Console, identifier.ConsoleSNES)
+	}
+
+	if result.InternalTitle != "240P TEST SUITE SNES" {
+		t.Errorf("InternalTitle = %q, want %q", result.InternalTitle, "240P TEST SUITE SNES")
+	}
+}
+
+// TestIdentifyFromArchive_RAR verifies identification from RAR archives.
+func TestIdentifyFromArchive_RAR(t *testing.T) {
+	t.Parallel()
+
+	result, err := Identify("testdata/archive/snes.rar", nil)
+	if err != nil {
+		t.Fatalf("Identify() error = %v", err)
+	}
+
+	if result.Console != identifier.ConsoleSNES {
+		t.Errorf("Console = %v, want %v", result.Console, identifier.ConsoleSNES)
+	}
+
+	if result.InternalTitle != "240P TEST SUITE SNES" {
+		t.Errorf("InternalTitle = %q, want %q", result.InternalTitle, "240P TEST SUITE SNES")
+	}
+}
+
+// TestIdentifyFromArchive_Genesis verifies identification of Genesis ROMs from archives.
+func TestIdentifyFromArchive_Genesis(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		path string
+	}{
+		{"ZIP", "testdata/archive/genesis.zip"},
+		{"7z", "testdata/archive/genesis.7z"},
+		{"RAR", "testdata/archive/genesis.rar"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := Identify(tt.path, nil)
+			if err != nil {
+				t.Fatalf("Identify() error = %v", err)
+			}
+
+			if result.Console != identifier.ConsoleGenesis {
+				t.Errorf("Console = %v, want %v", result.Console, identifier.ConsoleGenesis)
+			}
+
+			if result.InternalTitle != "240P TEST SUITE" {
+				t.Errorf("InternalTitle = %q, want %q", result.InternalTitle, "240P TEST SUITE")
+			}
+		})
+	}
+}
+
+// TestIdentifyFromArchive_WithInternalPath verifies MiSTer-style paths work.
+func TestIdentifyFromArchive_WithInternalPath(t *testing.T) {
+	t.Parallel()
+
+	// Test explicit internal path
+	result, err := Identify("testdata/archive/snes.zip/240pSuite.sfc", nil)
+	if err != nil {
+		t.Fatalf("Identify() error = %v", err)
+	}
+
+	if result.Console != identifier.ConsoleSNES {
+		t.Errorf("Console = %v, want %v", result.Console, identifier.ConsoleSNES)
+	}
+}
+
+// TestDetectConsoleFromExtension tests extension-based console detection.
+func TestDetectConsoleFromExtension(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		path    string
+		want    Console
+		wantErr bool
+	}{
+		// Unambiguous cartridge extensions
+		{"GBA", "game.gba", ConsoleGBA, false},
+		{"GBA uppercase", "game.GBA", ConsoleGBA, false},
+		{"GB", "game.gb", ConsoleGB, false},
+		{"GBC", "game.gbc", ConsoleGBC, false},
+		{"NES", "game.nes", ConsoleNES, false},
+		{"SNES sfc", "game.sfc", ConsoleSNES, false},
+		{"SNES smc", "game.smc", ConsoleSNES, false},
+		{"N64 z64", "game.z64", ConsoleN64, false},
+		{"N64 n64", "game.n64", ConsoleN64, false},
+		{"Genesis gen", "game.gen", ConsoleGenesis, false},
+		{"Genesis md", "game.md", ConsoleGenesis, false},
+
+		// GZ suffix stripping
+		{"GBA with gz", "game.gba.gz", ConsoleGBA, false},
+		{"NES with gz", "game.nes.gz", ConsoleNES, false},
+
+		// Ambiguous extensions should fail
+		{"Ambiguous bin", "game.bin", "", true},
+		{"Ambiguous iso", "game.iso", "", true},
+		{"Ambiguous cue", "game.cue", "", true},
+
+		// Unsupported extensions
+		{"Unsupported xyz", "game.xyz", "", true},
+		{"Unsupported tar", "game.tar", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := DetectConsoleFromExtension(tt.path)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("DetectConsoleFromExtension(%q) error = %v, wantErr %v", tt.path, err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("DetectConsoleFromExtension(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIdentifyFromArchive_Direct tests the IdentifyFromArchive function directly.
+func TestIdentifyFromArchive_Direct(t *testing.T) {
+	t.Parallel()
+
+	arc, err := archive.Open("testdata/archive/snes.zip")
+	if err != nil {
+		t.Fatalf("Failed to open archive: %v", err)
+	}
+	defer func() { _ = arc.Close() }()
+
+	result, err := IdentifyFromArchive(arc, "240pSuite.sfc", ConsoleSNES, nil)
+	if err != nil {
+		t.Fatalf("IdentifyFromArchive() error = %v", err)
+	}
+
+	if result.Console != identifier.ConsoleSNES {
+		t.Errorf("Console = %v, want %v", result.Console, identifier.ConsoleSNES)
+	}
+
+	if result.InternalTitle != "240P TEST SUITE SNES" {
+		t.Errorf("InternalTitle = %q, want %q", result.InternalTitle, "240P TEST SUITE SNES")
+	}
+}
+
+// TestIdentifyFromArchive_DiscConsole verifies error for disc-based consoles.
+func TestIdentifyFromArchive_DiscConsole(t *testing.T) {
+	t.Parallel()
+
+	arc, err := archive.Open("testdata/archive/snes.zip")
+	if err != nil {
+		t.Fatalf("Failed to open archive: %v", err)
+	}
+	defer func() { _ = arc.Close() }()
+
+	// PSX is disc-based, should fail
+	_, err = IdentifyFromArchive(arc, "240pSuite.sfc", ConsolePSX, nil)
+	if err == nil {
+		t.Error("IdentifyFromArchive() should error for disc-based console")
+	}
+}
+
+// TestIdentifyFromArchive_UnsupportedConsole verifies error for unsupported console.
+func TestIdentifyFromArchive_UnsupportedConsole(t *testing.T) {
+	t.Parallel()
+
+	arc, err := archive.Open("testdata/archive/snes.zip")
+	if err != nil {
+		t.Fatalf("Failed to open archive: %v", err)
+	}
+	defer func() { _ = arc.Close() }()
+
+	_, err = IdentifyFromArchive(arc, "240pSuite.sfc", "Xbox", nil)
+	if err == nil {
+		t.Error("IdentifyFromArchive() should error for unsupported console")
+	}
+}
+
+// TestIdentifyFromArchive_NonExistentFile verifies error for non-existent file in archive.
+func TestIdentifyFromArchive_NonExistentFile(t *testing.T) {
+	t.Parallel()
+
+	arc, err := archive.Open("testdata/archive/snes.zip")
+	if err != nil {
+		t.Fatalf("Failed to open archive: %v", err)
+	}
+	defer func() { _ = arc.Close() }()
+
+	_, err = IdentifyFromArchive(arc, "nonexistent.sfc", ConsoleSNES, nil)
+	if err == nil {
+		t.Error("IdentifyFromArchive() should error for non-existent file")
 	}
 }
