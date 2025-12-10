@@ -156,15 +156,23 @@ func snesGetHardware(romType, mapMode byte, data []byte, headerStart int) string
 
 // Identify extracts SNES game information from the given reader.
 func (*SNESIdentifier) Identify(reader io.ReaderAt, size int64, db Database) (*Result, error) {
-	// Read entire ROM for analysis
-	data := make([]byte, size)
-	if _, err := reader.ReadAt(data, 0); err != nil && err != io.EOF {
-		return nil, fmt.Errorf("failed to read SNES ROM: %w", err)
+	// Determine if file has SMC header (512 bytes) by checking file size
+	hasSMCHeader := size%1024 == 512
+
+	// Calculate read offset and size - we only need to read up to the HiROM header location
+	// plus header size. SMC header is at offset 0 if present.
+	readOffset := int64(0)
+	if hasSMCHeader {
+		readOffset = 512
 	}
 
-	// Check for and strip 512-byte SMC header
-	if len(data)%1024 == 512 {
-		data = data[512:]
+	// Only read what we need: up to HiROM header (0xFFC0) + header size (32 bytes)
+	maxNeeded := int64(snesHiROMHeaderStart + snesHeaderSize)
+	readSize := min(size-readOffset, maxNeeded)
+
+	data := make([]byte, readSize)
+	if _, err := reader.ReadAt(data, readOffset); err != nil && err != io.EOF {
+		return nil, fmt.Errorf("failed to read SNES ROM: %w", err)
 	}
 
 	// Find and parse header
