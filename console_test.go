@@ -437,3 +437,52 @@ func TestFileExists(t *testing.T) {
 		t.Error("fileExists() = true for directory")
 	}
 }
+
+// TestDetectConsoleFromCHD_SegaCD verifies CHD detection for Sega CD.
+func TestDetectConsoleFromCHD_SegaCD(t *testing.T) {
+	t.Parallel()
+
+	console, err := DetectConsole("testdata/SegaCD/240pSuite_USA.chd")
+	if err != nil {
+		t.Fatalf("DetectConsole() error = %v", err)
+	}
+	if console != identifier.ConsoleSegaCD {
+		t.Errorf("DetectConsole() = %v, want %v", console, identifier.ConsoleSegaCD)
+	}
+}
+
+// TestDetectConsoleFromCHD_NeoGeoCD verifies CHD detection for Neo Geo CD.
+func TestDetectConsoleFromCHD_NeoGeoCD(t *testing.T) {
+	t.Parallel()
+
+	console, err := DetectConsole("testdata/NeoGeoCD/240pTestSuite.chd")
+	if err != nil {
+		t.Fatalf("DetectConsole() error = %v", err)
+	}
+	if console != identifier.ConsoleNeoGeoCD {
+		t.Errorf("DetectConsole() = %v, want %v", console, identifier.ConsoleNeoGeoCD)
+	}
+}
+
+// TestDetectConsoleFromCHD_GameCube verifies CHD detection for GameCube.
+func TestDetectConsoleFromCHD_GameCube(t *testing.T) {
+	t.Parallel()
+
+	console, err := DetectConsole("testdata/GC/GameCube-240pSuite-1.17.chd")
+	if err != nil {
+		t.Fatalf("DetectConsole() error = %v", err)
+	}
+	if console != identifier.ConsoleGC {
+		t.Errorf("DetectConsole() = %v, want %v", console, identifier.ConsoleGC)
+	}
+}
+
+// TestDetectConsoleFromCHD_NonExistent verifies error for missing CHD.
+func TestDetectConsoleFromCHD_NonExistent(t *testing.T) {
+	t.Parallel()
+
+	_, err := DetectConsole("/nonexistent/path/game.chd")
+	if err == nil {
+		t.Error("DetectConsole() should fail for non-existent CHD")
+	}
+}

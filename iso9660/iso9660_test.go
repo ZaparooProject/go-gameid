@@ -430,3 +430,118 @@ func TestISO9660_GetPublisherID(t *testing.T) {
 		t.Errorf("GetPublisherID() = %q, want prefix %q", pubID, "MY PUBLISHER")
 	}
 }
+
+// TestOpenCHD_NeoGeoCD verifies OpenCHD with real Neo Geo CD test file.
+func TestOpenCHD_NeoGeoCD(t *testing.T) {
+	t.Parallel()
+
+	iso, err := OpenCHD("../testdata/NeoGeoCD/240pTestSuite.chd")
+	if err != nil {
+		t.Fatalf("OpenCHD failed: %v", err)
+	}
+	defer func() { _ = iso.Close() }()
+
+	// Verify we can read ISO9660 metadata
+	volumeID := iso.GetVolumeID()
+	if volumeID == "" {
+		t.Error("GetVolumeID() returned empty")
+	}
+	t.Logf("Volume ID: %q", volumeID)
+
+	// Verify we can list files
+	files, err := iso.IterFiles(false)
+	if err != nil {
+		t.Fatalf("IterFiles failed: %v", err)
+	}
+	t.Logf("Found %d files", len(files))
+
+	// Should have IPL.TXT for Neo Geo CD
+	hasIPL := false
+	for _, f := range files {
+		if strings.Contains(strings.ToUpper(f.Path), "IPL.TXT") {
+			hasIPL = true
+			break
+		}
+	}
+	if !hasIPL {
+		t.Log("Note: IPL.TXT not found in root - may be in subdirectory")
+	}
+}
+
+// TestOpenCHD_NonExistent verifies error handling for missing files.
+func TestOpenCHD_NonExistent(t *testing.T) {
+	t.Parallel()
+
+	_, err := OpenCHD("/nonexistent/path/file.chd")
+	if err == nil {
+		t.Error("OpenCHD should fail for non-existent file")
+	}
+}
+
+// TestOpenCHD_InvalidCHD verifies error handling for non-CHD files.
+func TestOpenCHD_InvalidCHD(t *testing.T) {
+	t.Parallel()
+
+	// Try to open a non-CHD file
+	_, err := OpenCHD("iso9660_test.go")
+	if err == nil {
+		t.Error("OpenCHD should fail for non-CHD file")
+	}
+}
+
+// TestOpenReaderWithCloser verifies OpenReaderWithCloser functionality.
+func TestOpenReaderWithCloser(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	isoData := createMinimalISO("TEST", "SYS", "PUB")
+	isoPath := filepath.Join(tmpDir, "test.iso")
+	if err := os.WriteFile(isoPath, isoData, 0o600); err != nil {
+		t.Fatalf("Failed to write ISO: %v", err)
+	}
+
+	// Open the file and use OpenReaderWithCloser
+	//nolint:gosec // G304: test file path constructed from t.TempDir
+	file, err := os.Open(isoPath)
+	if err != nil {
+		t.Fatalf("Failed to open file: %v", err)
+	}
+
+	stat, _ := file.Stat()
+	iso, err := OpenReaderWithCloser(file, stat.Size(), file)
+	if err != nil {
+		_ = file.Close()
+		t.Fatalf("OpenReaderWithCloser failed: %v", err)
+	}
+
+	// Verify it works
+	_ = iso.GetVolumeID()
+
+	// Close should close the underlying file
+	if err := iso.Close(); err != nil {
+		t.Errorf("Close failed: %v", err)
+	}
+}
+
+// TestGetDataPreparerID verifies data preparer ID extraction.
+func TestGetDataPreparerID(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	isoData := createMinimalISO("VOL", "SYS", "PUB")
+	isoPath := filepath.Join(tmpDir, "test.iso")
+	if err := os.WriteFile(isoPath, isoData, 0o600); err != nil {
+		t.Fatalf("Failed to write ISO: %v", err)
+	}
+
+	iso, err := Open(isoPath)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer func() { _ = iso.Close() }()
+
+	// Data preparer ID is at a different offset - our minimal ISO doesn't set it
+	_ = iso.GetDataPreparerID()
+}

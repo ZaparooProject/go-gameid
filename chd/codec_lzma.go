@@ -142,6 +142,7 @@ func (*cdLZMACodec) DecompressCD(dst, src []byte, destLen, frames int) (int, err
 	// Extract compressed base length
 	var compLenBase int
 	if compLenBytes > 2 {
+		//nolint:gosec // G602: bounds checked via headerBytes = eccBytes + compLenBytes check above
 		compLenBase = int(src[eccBytes])<<16 | int(src[eccBytes+1])<<8 | int(src[eccBytes+2])
 	} else {
 		compLenBase = int(binary.BigEndian.Uint16(src[eccBytes : eccBytes+2]))

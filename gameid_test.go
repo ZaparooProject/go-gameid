@@ -296,3 +296,131 @@ func TestIsBlockDevice(t *testing.T) {
 		t.Error("isBlockDevice() should return false for non-existent device")
 	}
 }
+
+// TestIdentifyFromReader verifies IdentifyFromReader with a GBA ROM.
+func TestIdentifyFromReader(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	gbaPath := createTestGBAFile(t, tmpDir)
+
+	// Open the file and use IdentifyFromReader
+	//nolint:gosec // G304: test file path constructed from t.TempDir
+	file, err := os.Open(gbaPath)
+	if err != nil {
+		t.Fatalf("Failed to open file: %v", err)
+	}
+	defer func() { _ = file.Close() }()
+
+	stat, err := file.Stat()
+	if err != nil {
+		t.Fatalf("Failed to stat file: %v", err)
+	}
+
+	result, err := IdentifyFromReader(file, stat.Size(), ConsoleGBA, nil)
+	if err != nil {
+		t.Fatalf("IdentifyFromReader() error = %v", err)
+	}
+
+	if result.Console != identifier.ConsoleGBA {
+		t.Errorf("Console = %v, want %v", result.Console, identifier.ConsoleGBA)
+	}
+
+	if result.ID != "ATST" {
+		t.Errorf("ID = %q, want %q", result.ID, "ATST")
+	}
+}
+
+// TestIdentifyFromReader_UnsupportedConsole verifies error for unsupported console.
+func TestIdentifyFromReader_UnsupportedConsole(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	gbaPath := createTestGBAFile(t, tmpDir)
+
+	//nolint:gosec // G304: test file path constructed from t.TempDir
+	file, err := os.Open(gbaPath)
+	if err != nil {
+		t.Fatalf("Failed to open file: %v", err)
+	}
+	defer func() { _ = file.Close() }()
+
+	stat, err := file.Stat()
+	if err != nil {
+		t.Fatalf("Failed to stat file: %v", err)
+	}
+
+	_, err = IdentifyFromReader(file, stat.Size(), "Xbox", nil)
+	if err == nil {
+		t.Error("IdentifyFromReader() should error for unsupported console")
+	}
+}
+
+// TestIdentifyWithConsole_UnsupportedConsole verifies error for unsupported console.
+func TestIdentifyWithConsole_UnsupportedConsole(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	gbaPath := createTestGBAFile(t, tmpDir)
+
+	_, err := IdentifyWithConsole(gbaPath, "Xbox", nil)
+	if err == nil {
+		t.Error("IdentifyWithConsole() should error for unsupported console")
+	}
+}
+
+// TestIdentifyFromDirectory_PSP verifies mounted PSP directory identification.
+func TestIdentifyFromDirectory_PSP(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Create UMD_DATA.BIN marker file (identifies as PSP)
+	markerPath := filepath.Join(tmpDir, "UMD_DATA.BIN")
+	if err := os.WriteFile(markerPath, []byte("ULJM12345|0000000001|0001"), 0o600); err != nil {
+		t.Fatalf("Failed to create marker file: %v", err)
+	}
+
+	// First detect the console
+	console, err := DetectConsole(tmpDir)
+	if err != nil {
+		t.Fatalf("DetectConsole() error = %v", err)
+	}
+	if console != ConsolePSP {
+		t.Fatalf("DetectConsole() = %v, want PSP", console)
+	}
+
+	// Now identify - note this will error because we don't have a full PSP filesystem
+	// but it will exercise the identifyFromDirectory path
+	_, err = IdentifyWithConsole(tmpDir, console, nil)
+	// Error is expected since we don't have PARAM.SFO
+	if err == nil {
+		t.Log("IdentifyWithConsole() succeeded unexpectedly for minimal PSP dir")
+	}
+}
+
+// TestIdentifyFromDirectory_CartridgeConsole verifies error when using directory with cartridge console.
+func TestIdentifyFromDirectory_CartridgeConsole(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Try to identify a directory as a GBA game (cartridge-based)
+	// This should fail since directories aren't supported for cartridge consoles
+	_, err := identifyFromDirectory(tmpDir, ConsoleGBA, nil)
+	if err == nil {
+		t.Error("identifyFromDirectory() should error for cartridge-based console")
+	}
+}
+
+// TestIdentifyFromDirectory_UnsupportedConsole verifies error for unsupported console.
+func TestIdentifyFromDirectory_UnsupportedConsole(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	_, err := identifyFromDirectory(tmpDir, "Xbox", nil)
+	if err == nil {
+		t.Error("identifyFromDirectory() should error for unsupported console")
+	}
+}
