@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ZaparooProject/go-gameid/chd"
 	"github.com/ZaparooProject/go-gameid/identifier"
 	"github.com/ZaparooProject/go-gameid/iso9660"
 )
@@ -154,6 +155,11 @@ func detectConsoleFromHeader(path, ext string) (identifier.Console, error) {
 		return detectConsoleFromCue(path)
 	}
 
+	// Handle CHD files specially
+	if ext == ".chd" {
+		return detectConsoleFromCHD(path)
+	}
+
 	// Read header for analysis
 	file, err := os.Open(path) //nolint:gosec // Path from user input is expected
 	if err != nil {
@@ -199,6 +205,44 @@ func detectConsoleFromHeader(path, ext string) (identifier.Console, error) {
 	}
 
 	return "", identifier.ErrNotSupported{Format: ext}
+}
+
+// detectConsoleFromCHD handles CHD disc image detection.
+func detectConsoleFromCHD(path string) (identifier.Console, error) {
+	chdFile, err := chd.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open CHD: %w", err)
+	}
+	defer func() { _ = chdFile.Close() }()
+
+	// Read first sectors for magic word detection
+	reader := chdFile.RawSectorReader()
+	header := make([]byte, 0x1000)
+	if _, readErr := reader.ReadAt(header, 0); readErr != nil {
+		return "", fmt.Errorf("read CHD header: %w", readErr)
+	}
+
+	// Check for Sega consoles first (they have magic words in raw sector data)
+	if identifier.ValidateSaturn(header) {
+		return identifier.ConsoleSaturn, nil
+	}
+	if identifier.ValidateSegaCD(header) {
+		return identifier.ConsoleSegaCD, nil
+	}
+
+	// Check for GameCube (non-ISO9660 proprietary format)
+	if identifier.ValidateGC(header) {
+		return identifier.ConsoleGC, nil
+	}
+
+	// Try parsing as ISO9660 for PSX/PS2/PSP/NeoGeoCD
+	iso, err := iso9660.OpenCHD(path)
+	if err != nil {
+		return "", fmt.Errorf("open CHD as ISO: %w", err)
+	}
+	defer func() { _ = iso.Close() }()
+
+	return detectConsoleFromISO(iso)
 }
 
 // detectConsoleFromCue handles CUE sheet detection
