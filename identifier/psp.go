@@ -48,9 +48,22 @@ func (*PSPIdentifier) Identify(_ io.ReaderAt, _ int64, _ Database) (*Result, err
 
 // IdentifyFromPath identifies a PSP game from a file path.
 func (*PSPIdentifier) IdentifyFromPath(path string, database Database) (*Result, error) {
-	iso, err := iso9660.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open ISO: %w", err)
+	ext := strings.ToLower(filepath.Ext(path))
+
+	var iso *iso9660.ISO9660
+	var err error
+
+	switch ext {
+	case ".chd":
+		iso, err = iso9660.OpenCHD(path)
+		if err != nil {
+			return nil, fmt.Errorf("open CHD: %w", err)
+		}
+	default:
+		iso, err = iso9660.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("open ISO: %w", err)
+		}
 	}
 	defer func() { _ = iso.Close() }()
 

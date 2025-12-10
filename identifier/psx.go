@@ -35,23 +35,32 @@ type playstationISO interface {
 	Close() error
 }
 
-// openPlayStationISO opens an ISO from a path, handling CUE files.
+// openPlayStationISO opens an ISO from a path, handling CUE and CHD files.
 func openPlayStationISO(path string) (playstationISO, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 
-	if ext == ".cue" {
+	switch ext {
+	case ".cue":
 		iso, err := iso9660.OpenCue(path)
 		if err != nil {
 			return nil, fmt.Errorf("open CUE: %w", err)
 		}
 		return iso, nil
-	}
 
-	iso, err := iso9660.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open ISO: %w", err)
+	case ".chd":
+		iso, err := iso9660.OpenCHD(path)
+		if err != nil {
+			return nil, fmt.Errorf("open CHD: %w", err)
+		}
+		return iso, nil
+
+	default:
+		iso, err := iso9660.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("open ISO: %w", err)
+		}
+		return iso, nil
 	}
-	return iso, nil
 }
 
 // identifyPlayStation identifies a PlayStation game from an ISO.

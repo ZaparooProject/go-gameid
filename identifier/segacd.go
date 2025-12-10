@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ZaparooProject/go-gameid/chd"
 	"github.com/ZaparooProject/go-gameid/internal/binary"
 	"github.com/ZaparooProject/go-gameid/iso9660"
 )
@@ -66,13 +67,19 @@ func (s *SegaCDIdentifier) Identify(reader io.ReaderAt, size int64, db Database)
 }
 
 // IdentifyFromPath identifies a Sega CD game from a file path.
+//
+
 func (s *SegaCDIdentifier) IdentifyFromPath(path string, database Database) (*Result, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 
-	if ext == ".cue" {
+	switch ext {
+	case ".cue":
 		return s.identifyFromCue(path, database)
+	case ".chd":
+		return s.identifyFromCHD(path, database)
+	default:
+		return s.identifyFromISO(path, database)
 	}
-	return s.identifyFromISO(path, database)
 }
 
 func (s *SegaCDIdentifier) identifyFromCue(path string, database Database) (*Result, error) {
@@ -115,6 +122,28 @@ func (s *SegaCDIdentifier) identifyFromISO(path string, database Database) (*Res
 	}
 
 	iso, _ := iso9660.Open(path)
+	if iso != nil {
+		defer func() { _ = iso.Close() }()
+	}
+
+	return s.identifyFromHeader(header, database, iso)
+}
+
+func (s *SegaCDIdentifier) identifyFromCHD(path string, database Database) (*Result, error) {
+	chdFile, err := chd.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open CHD: %w", err)
+	}
+	defer func() { _ = chdFile.Close() }()
+
+	header := make([]byte, 0x300)
+	reader := chdFile.RawSectorReader()
+	if _, err := reader.ReadAt(header, 0); err != nil {
+		return nil, fmt.Errorf("read CHD header: %w", err)
+	}
+
+	// ISO parsing is optional - SegaCD can be identified from raw header alone
+	iso, _ := iso9660.OpenCHD(path)
 	if iso != nil {
 		defer func() { _ = iso.Close() }()
 	}

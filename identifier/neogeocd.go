@@ -56,13 +56,20 @@ func (n *NeoGeoCDIdentifier) IdentifyFromPath(path string, database Database) (*
 
 	ext := strings.ToLower(filepath.Ext(path))
 
-	if ext == ".cue" {
+	switch ext {
+	case ".cue":
 		isoFile, err := iso9660.OpenCue(path)
 		if err != nil {
 			return nil, fmt.Errorf("open CUE: %w", err)
 		}
 		iso = isoFile
-	} else {
+	case ".chd":
+		isoFile, err := iso9660.OpenCHD(path)
+		if err != nil {
+			return nil, fmt.Errorf("open CHD: %w", err)
+		}
+		iso = isoFile
+	default:
 		isoFile, err := iso9660.Open(path)
 		if err != nil {
 			return nil, fmt.Errorf("open ISO: %w", err)

@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ZaparooProject/go-gameid/chd"
 	"github.com/ZaparooProject/go-gameid/internal/binary"
 	"github.com/ZaparooProject/go-gameid/iso9660"
 )
@@ -93,13 +94,15 @@ func (s *SaturnIdentifier) Identify(reader io.ReaderAt, size int64, db Database)
 }
 
 // IdentifyFromPath identifies a Saturn game from a file path.
+//
+//nolint:gocognit,revive // CUE/CHD/ISO handling requires separate branches
 func (s *SaturnIdentifier) IdentifyFromPath(path string, database Database) (*Result, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 
 	var header []byte
 
-	//nolint:nestif // CUE vs ISO handling requires separate branches
-	if ext == ".cue" {
+	switch ext {
+	case ".cue":
 		cue, err := iso9660.ParseCue(path)
 		if err != nil {
 			return nil, fmt.Errorf("parse CUE: %w", err)
@@ -116,7 +119,20 @@ func (s *SaturnIdentifier) IdentifyFromPath(path string, database Database) (*Re
 		if _, err := binFile.Read(header); err != nil {
 			return nil, fmt.Errorf("read BIN header: %w", err)
 		}
-	} else {
+
+	case ".chd":
+		chdFile, err := chd.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("open CHD: %w", err)
+		}
+		defer func() { _ = chdFile.Close() }()
+		header = make([]byte, 0x100)
+		reader := chdFile.RawSectorReader()
+		if _, err := reader.ReadAt(header, 0); err != nil {
+			return nil, fmt.Errorf("read CHD header: %w", err)
+		}
+
+	default:
 		isoFile, err := os.Open(path) //nolint:gosec // Path from user input is expected
 		if err != nil {
 			return nil, fmt.Errorf("open ISO file: %w", err)

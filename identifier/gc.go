@@ -21,7 +21,10 @@ package identifier
 import (
 	"fmt"
 	"io"
+	"path/filepath"
+	"strings"
 
+	"github.com/ZaparooProject/go-gameid/chd"
 	"github.com/ZaparooProject/go-gameid/internal/binary"
 )
 
@@ -116,4 +119,31 @@ func ValidateGC(header []byte) bool {
 	}
 	magic := header[0x1C : 0x1C+4]
 	return binary.BytesEqual(magic, gcMagicWord)
+}
+
+// IdentifyFromPath handles path-based identification for GameCube discs.
+// This is needed for CHD files which require special handling.
+func (g *GCIdentifier) IdentifyFromPath(path string, db Database) (*Result, error) {
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext == ".chd" {
+		return g.identifyFromCHD(path, db)
+	}
+
+	// For non-CHD files, fall back to standard file reading
+	return nil, ErrNotSupported{Format: "use standard Identify for non-CHD files"}
+}
+
+// identifyFromCHD reads GameCube disc data from a CHD file.
+func (g *GCIdentifier) identifyFromCHD(path string, db Database) (*Result, error) {
+	chdFile, err := chd.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open CHD: %w", err)
+	}
+	defer func() { _ = chdFile.Close() }()
+
+	// GameCube discs don't use ISO9660 - read raw sector data
+	reader := chdFile.RawSectorReader()
+	size := chdFile.Size()
+
+	return g.Identify(reader, size, db)
 }

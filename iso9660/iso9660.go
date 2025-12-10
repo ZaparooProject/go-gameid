@@ -55,7 +55,8 @@ type pathTableEntry struct {
 
 // ISO9660 represents a parsed ISO9660 disc image.
 type ISO9660 struct {
-	file        *os.File
+	reader      io.ReaderAt
+	closer      io.Closer // Optional closer for the underlying reader
 	pvd         []byte
 	pathTable   []pathTableEntry
 	blockSize   int
@@ -78,8 +79,9 @@ func Open(path string) (*ISO9660, error) {
 	}
 
 	iso := &ISO9660{
-		file: isoFile,
-		size: info.Size(),
+		reader: isoFile,
+		closer: isoFile,
+		size:   info.Size(),
 	}
 
 	if err := iso.init(); err != nil {
@@ -94,19 +96,22 @@ func Open(path string) (*ISO9660, error) {
 // OpenReader creates an ISO9660 from an io.ReaderAt.
 // The caller is responsible for closing the underlying reader if needed.
 func OpenReader(reader io.ReaderAt, size int64) (*ISO9660, error) {
-	iso := &ISO9660{
-		size: size,
-	}
+	return OpenReaderWithCloser(reader, size, nil)
+}
 
-	// Create a wrapper that implements the file interface we need
-	fileReader, ok := reader.(*os.File)
-	if !ok {
-		// For non-file readers, we need a different approach
-		return nil, errors.New("OpenReader currently only supports *os.File")
+// OpenReaderWithCloser creates an ISO9660 from an io.ReaderAt with an optional closer.
+// The closer will be called when Close() is called on the ISO9660.
+func OpenReaderWithCloser(reader io.ReaderAt, size int64, closer io.Closer) (*ISO9660, error) {
+	iso := &ISO9660{
+		reader: reader,
+		closer: closer,
+		size:   size,
 	}
-	iso.file = fileReader
 
 	if err := iso.init(); err != nil {
+		if closer != nil {
+			_ = closer.Close()
+		}
 		return nil, err
 	}
 
@@ -122,7 +127,9 @@ func (iso *ISO9660) init() error {
 	case iso.size%2048 == 0:
 		iso.blockSize = 2048
 	default:
-		return ErrInvalidBlock
+		// For CHD sources, block size may not divide evenly
+		// Default to 2048 for ISO9660 standard
+		iso.blockSize = 2048
 	}
 
 	// Search for PVD in first ~1MB
@@ -132,7 +139,7 @@ func (iso *ISO9660) init() error {
 	}
 
 	header := make([]byte, searchSize)
-	if _, err := iso.file.ReadAt(header, 0); err != nil && err != io.EOF {
+	if _, err := iso.reader.ReadAt(header, 0); err != nil && err != io.EOF {
 		return fmt.Errorf("failed to read header: %w", err)
 	}
 
@@ -161,7 +168,7 @@ func (iso *ISO9660) init() error {
 
 	// Read PVD (one block)
 	iso.pvd = make([]byte, iso.blockSize)
-	if _, err := iso.file.ReadAt(iso.pvd, pvdOffset); err != nil {
+	if _, err := iso.reader.ReadAt(iso.pvd, pvdOffset); err != nil {
 		return fmt.Errorf("failed to read PVD: %w", err)
 	}
 
@@ -183,7 +190,7 @@ func (iso *ISO9660) parsePathTable() error {
 	// Read path table
 	offset := iso.blockOffset + int64(pathTableLBA)*int64(iso.blockSize)
 	pathTableRaw := make([]byte, pathTableSize)
-	if _, err := iso.file.ReadAt(pathTableRaw, offset); err != nil {
+	if _, err := iso.reader.ReadAt(pathTableRaw, offset); err != nil {
 		return fmt.Errorf("failed to read path table: %w", err)
 	}
 
@@ -228,9 +235,9 @@ func (iso *ISO9660) parsePathTable() error {
 
 // Close closes the ISO9660 file.
 func (iso *ISO9660) Close() error {
-	if iso.file != nil {
-		if err := iso.file.Close(); err != nil {
-			return fmt.Errorf("close ISO file: %w", err)
+	if iso.closer != nil {
+		if err := iso.closer.Close(); err != nil {
+			return fmt.Errorf("close ISO: %w", err)
 		}
 	}
 	return nil
@@ -313,7 +320,7 @@ func (iso *ISO9660) IterFiles(onlyRootDir bool) ([]FileInfo, error) {
 		for {
 			// Read record length
 			lenBuf := make([]byte, 1)
-			if _, err := iso.file.ReadAt(lenBuf, offset); err != nil {
+			if _, err := iso.reader.ReadAt(lenBuf, offset); err != nil {
 				break
 			}
 			recLen := int(lenBuf[0])
@@ -323,7 +330,7 @@ func (iso *ISO9660) IterFiles(onlyRootDir bool) ([]FileInfo, error) {
 
 			// Read record
 			recBuf := make([]byte, recLen-1)
-			if _, err := iso.file.ReadAt(recBuf, offset+1); err != nil {
+			if _, err := iso.reader.ReadAt(recBuf, offset+1); err != nil {
 				break
 			}
 
@@ -368,7 +375,7 @@ func (iso *ISO9660) IterFiles(onlyRootDir bool) ([]FileInfo, error) {
 func (iso *ISO9660) ReadFile(info FileInfo) ([]byte, error) {
 	offset := iso.blockOffset + int64(info.LBA)*int64(iso.blockSize)
 	data := make([]byte, info.Size)
-	if _, err := iso.file.ReadAt(data, offset); err != nil && err != io.EOF {
+	if _, err := iso.reader.ReadAt(data, offset); err != nil && err != io.EOF {
 		return nil, fmt.Errorf("failed to read file %s: %w", info.Path, err)
 	}
 	return data, nil
