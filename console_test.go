@@ -486,3 +486,92 @@ func TestDetectConsoleFromCHD_NonExistent(t *testing.T) {
 		t.Error("DetectConsole() should fail for non-existent CHD")
 	}
 }
+
+// TestDetectConsoleFromCue_MagicBased verifies CUE detection for consoles with magic headers.
+func TestDetectConsoleFromCue_MagicBased(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		magic string
+		want  identifier.Console
+	}{
+		{"Saturn", "SEGA SEGASATURN", identifier.ConsoleSaturn},
+		{"SegaCD", "SEGADISCSYSTEM", identifier.ConsoleSegaCD},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tmpDir := t.TempDir()
+
+			// Create BIN file with magic
+			binPath := filepath.Join(tmpDir, "game.bin")
+			binData := make([]byte, 0x100)
+			copy(binData, tt.magic)
+			if err := os.WriteFile(binPath, binData, 0o600); err != nil {
+				t.Fatalf("Failed to write BIN file: %v", err)
+			}
+
+			// Create CUE file
+			cuePath := filepath.Join(tmpDir, "game.cue")
+			cueContent := `FILE "game.bin" BINARY
+  TRACK 01 MODE1/2352
+    INDEX 01 00:00:00
+`
+			if err := os.WriteFile(cuePath, []byte(cueContent), 0o600); err != nil {
+				t.Fatalf("Failed to write CUE file: %v", err)
+			}
+
+			console, err := DetectConsole(cuePath)
+			if err != nil {
+				t.Fatalf("DetectConsole() error = %v", err)
+			}
+			if console != tt.want {
+				t.Errorf("DetectConsole() = %v, want %v", console, tt.want)
+			}
+		})
+	}
+}
+
+// TestDetectConsoleFromCue_EmptyCue verifies error for empty CUE.
+func TestDetectConsoleFromCue_EmptyCue(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Create CUE file with no BIN files
+	cuePath := filepath.Join(tmpDir, "game.cue")
+	cueContent := "REM Empty CUE\n"
+	if err := os.WriteFile(cuePath, []byte(cueContent), 0o600); err != nil {
+		t.Fatalf("Failed to write CUE file: %v", err)
+	}
+
+	_, err := DetectConsole(cuePath)
+	if err == nil {
+		t.Error("DetectConsole() should fail for empty CUE")
+	}
+}
+
+// TestDetectConsoleFromCue_MissingBin verifies error for CUE with missing BIN.
+func TestDetectConsoleFromCue_MissingBin(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	// Create CUE file referencing missing BIN
+	cuePath := filepath.Join(tmpDir, "game.cue")
+	cueContent := `FILE "nonexistent.bin" BINARY
+  TRACK 01 MODE1/2352
+    INDEX 01 00:00:00
+`
+	if err := os.WriteFile(cuePath, []byte(cueContent), 0o600); err != nil {
+		t.Fatalf("Failed to write CUE file: %v", err)
+	}
+
+	_, err := DetectConsole(cuePath)
+	if err == nil {
+		t.Error("DetectConsole() should fail for CUE with missing BIN")
+	}
+}

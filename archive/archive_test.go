@@ -308,3 +308,256 @@ func TestZIPArchive_OpenReaderAt(t *testing.T) {
 		t.Error("content mismatch at offset 5")
 	}
 }
+
+// Tests for 7z and RAR archives using real testdata via table-driven tests
+
+//nolint:gocognit,gocyclo,revive,cyclop,funlen // Table-driven test with nested subtests has inherent complexity
+func TestSevenZipAndRAR_Operations(t *testing.T) {
+	t.Parallel()
+
+	archiveFormats := []struct {
+		name string
+		path string
+	}{
+		{"7z", "../testdata/archive/snes.7z"},
+		{"RAR", "../testdata/archive/snes.rar"},
+	}
+
+	for _, format := range archiveFormats {
+		t.Run(format.name+"_List", func(t *testing.T) {
+			t.Parallel()
+
+			arc, err := archive.Open(format.path)
+			if err != nil {
+				t.Fatalf("open archive: %v", err)
+			}
+			defer func() { _ = arc.Close() }()
+
+			files, err := arc.List()
+			if err != nil {
+				t.Fatalf("list files: %v", err)
+			}
+
+			if len(files) != 1 {
+				t.Errorf("got %d files, want 1", len(files))
+			}
+
+			if files[0].Name != "240pSuite.sfc" {
+				t.Errorf("got filename %q, want %q", files[0].Name, "240pSuite.sfc")
+			}
+		})
+
+		t.Run(format.name+"_Open", func(t *testing.T) {
+			t.Parallel()
+
+			arc, err := archive.Open(format.path)
+			if err != nil {
+				t.Fatalf("open archive: %v", err)
+			}
+			defer func() { _ = arc.Close() }()
+
+			reader, size, err := arc.Open("240pSuite.sfc")
+			if err != nil {
+				t.Fatalf("open file: %v", err)
+			}
+			defer func() { _ = reader.Close() }()
+
+			if size != 524288 {
+				t.Errorf("got size %d, want 524288", size)
+			}
+
+			data := make([]byte, 32)
+			_, err = reader.Read(data)
+			if err != nil {
+				t.Fatalf("read file: %v", err)
+			}
+		})
+
+		t.Run(format.name+"_Open_NonExistent", func(t *testing.T) {
+			t.Parallel()
+
+			arc, err := archive.Open(format.path)
+			if err != nil {
+				t.Fatalf("open archive: %v", err)
+			}
+			defer func() { _ = arc.Close() }()
+
+			_, _, err = arc.Open("nonexistent.sfc")
+			if err == nil {
+				t.Error("expected error for non-existent file")
+			}
+
+			var notFoundErr archive.FileNotFoundError
+			if !errors.As(err, &notFoundErr) {
+				t.Errorf("expected FileNotFoundError, got %T", err)
+			}
+		})
+
+		t.Run(format.name+"_Open_CaseInsensitive", func(t *testing.T) {
+			t.Parallel()
+
+			arc, err := archive.Open(format.path)
+			if err != nil {
+				t.Fatalf("open archive: %v", err)
+			}
+			defer func() { _ = arc.Close() }()
+
+			reader, _, err := arc.Open("240PSUITE.SFC")
+			if err != nil {
+				t.Fatalf("open file case-insensitive: %v", err)
+			}
+			_ = reader.Close()
+		})
+
+		t.Run(format.name+"_OpenReaderAt", func(t *testing.T) {
+			t.Parallel()
+
+			arc, err := archive.Open(format.path)
+			if err != nil {
+				t.Fatalf("open archive: %v", err)
+			}
+			defer func() { _ = arc.Close() }()
+
+			readerAt, size, closer, err := arc.OpenReaderAt("240pSuite.sfc")
+			if err != nil {
+				t.Fatalf("open reader at: %v", err)
+			}
+			defer func() { _ = closer.Close() }()
+
+			if size != 524288 {
+				t.Errorf("got size %d, want 524288", size)
+			}
+
+			buf := make([]byte, 21)
+			_, err = readerAt.ReadAt(buf, 0x7FC0)
+			if err != nil {
+				t.Fatalf("read at: %v", err)
+			}
+		})
+	}
+}
+
+func TestOpenArchive_NonExistent(t *testing.T) {
+	t.Parallel()
+
+	nonExistentPaths := []string{
+		"/nonexistent/path/file.7z",
+		"/nonexistent/path/file.rar",
+	}
+
+	for _, path := range nonExistentPaths {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := archive.Open(path)
+			if err == nil {
+				t.Errorf("expected error for non-existent archive: %s", path)
+			}
+		})
+	}
+}
+
+// Test byteReaderAt edge cases
+
+func TestByteReaderAt_NegativeOffset(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	testContent := []byte("test content")
+	zipPath := createTestZIP(t, tmpDir, "negative.zip", map[string][]byte{"test.txt": testContent})
+
+	arc, err := archive.Open(zipPath)
+	if err != nil {
+		t.Fatalf("open archive: %v", err)
+	}
+	defer func() { _ = arc.Close() }()
+
+	readerAt, _, closer, err := arc.OpenReaderAt("test.txt")
+	if err != nil {
+		t.Fatalf("open reader at: %v", err)
+	}
+	defer func() { _ = closer.Close() }()
+
+	buf := make([]byte, 4)
+	_, err = readerAt.ReadAt(buf, -1)
+	if err == nil {
+		t.Error("expected error for negative offset")
+	}
+}
+
+func TestByteReaderAt_OffsetPastEnd(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	testContent := []byte("test content")
+	zipPath := createTestZIP(t, tmpDir, "pastend.zip", map[string][]byte{"test.txt": testContent})
+
+	arc, err := archive.Open(zipPath)
+	if err != nil {
+		t.Fatalf("open archive: %v", err)
+	}
+	defer func() { _ = arc.Close() }()
+
+	readerAt, _, closer, err := arc.OpenReaderAt("test.txt")
+	if err != nil {
+		t.Fatalf("open reader at: %v", err)
+	}
+	defer func() { _ = closer.Close() }()
+
+	buf := make([]byte, 4)
+	_, err = readerAt.ReadAt(buf, 1000)
+	if !errors.Is(err, io.EOF) {
+		t.Errorf("expected io.EOF for offset past end, got %v", err)
+	}
+}
+
+func TestByteReaderAt_PartialRead(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	testContent := []byte("test")
+	zipPath := createTestZIP(t, tmpDir, "partial.zip", map[string][]byte{"test.txt": testContent})
+
+	arc, err := archive.Open(zipPath)
+	if err != nil {
+		t.Fatalf("open archive: %v", err)
+	}
+	defer func() { _ = arc.Close() }()
+
+	readerAt, _, closer, err := arc.OpenReaderAt("test.txt")
+	if err != nil {
+		t.Fatalf("open reader at: %v", err)
+	}
+	defer func() { _ = closer.Close() }()
+
+	// Request more bytes than available from offset 2
+	buf := make([]byte, 10)
+	n, err := readerAt.ReadAt(buf, 2)
+	if !errors.Is(err, io.EOF) {
+		t.Errorf("expected io.EOF for partial read, got %v", err)
+	}
+	if n != 2 {
+		t.Errorf("expected 2 bytes read, got %d", n)
+	}
+}
+
+// Test OpenReaderAt error case
+
+func TestOpenReaderAt_NonExistent(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	testContent := []byte("test content")
+	zipPath := createTestZIP(t, tmpDir, "readeraterr.zip", map[string][]byte{"test.txt": testContent})
+
+	arc, err := archive.Open(zipPath)
+	if err != nil {
+		t.Fatalf("open archive: %v", err)
+	}
+	defer func() { _ = arc.Close() }()
+
+	_, _, _, err = arc.OpenReaderAt("nonexistent.txt")
+	if err == nil {
+		t.Error("expected error for non-existent file in OpenReaderAt")
+	}
+}
