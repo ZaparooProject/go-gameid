@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// Copyright (c) 2026 Niema Moshiri and The Zaparoo Project.
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // This file is part of go-gameid.
@@ -257,10 +257,11 @@ func snesGetCoprocessor(mapMode byte, data []byte, headerStart int) string {
 
 // snesGetExtendedCoprocessor determines extended coprocessor type (0xF chip byte).
 func snesGetExtendedCoprocessor(data []byte, headerStart int) string {
-	if headerStart <= 0 {
+	idx := headerStart - 1
+	if idx < 0 || idx >= len(data) {
 		return ""
 	}
-	prevByte := data[headerStart-1]
+	prevByte := data[idx]
 	switch prevByte & 0x0F {
 	case 0:
 		return "SPC7110"

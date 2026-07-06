@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// Copyright (c) 2026 Niema Moshiri and The Zaparoo Project.
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // This file is part of go-gameid.
@@ -19,6 +19,7 @@
 package iso9660
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"os"
@@ -521,6 +522,55 @@ func TestOpenReaderWithCloser(t *testing.T) {
 	// Close should close the underlying file
 	if err := iso.Close(); err != nil {
 		t.Errorf("Close failed: %v", err)
+	}
+}
+
+// TestInitPresetBlockSize verifies that a caller-pinned block size (used for
+// block devices, which always expose 2048-byte sectors) is not overridden by
+// the size-based heuristic, even when the size happens to divide by 2352.
+func TestInitPresetBlockSize(t *testing.T) {
+	t.Parallel()
+
+	isoData := createMinimalISO("TEST", "SYS", "PUB")
+	// Pad so the total size divides evenly by 2352 (lcm(2048,2352) = 301056):
+	// the heuristic would pick 2352 for this size, but the pinned value must win.
+	const lcmBlockSizes = 301056
+	padded := make([]byte, ((len(isoData)/lcmBlockSizes)+1)*lcmBlockSizes)
+	copy(padded, isoData)
+
+	iso := &ISO9660{
+		reader:    bytes.NewReader(padded),
+		size:      int64(len(padded)),
+		blockSize: 2048,
+	}
+	if err := iso.init(); err != nil {
+		t.Fatalf("init() error = %v", err)
+	}
+	if iso.BlockSize() != 2048 {
+		t.Errorf("BlockSize() = %d, want 2048", iso.BlockSize())
+	}
+	if got := strings.Trim(iso.GetVolumeID(), "\x00 "); got != "TEST" {
+		t.Errorf("GetVolumeID() = %q, want %q", got, "TEST")
+	}
+}
+
+// TestReadFileSizeCap verifies that a corrupt directory record claiming a huge
+// file size is rejected instead of allocating the claimed amount.
+func TestReadFileSizeCap(t *testing.T) {
+	t.Parallel()
+
+	isoData := createMinimalISO("TEST", "SYS", "PUB")
+	iso, err := OpenReader(bytes.NewReader(isoData), int64(len(isoData)))
+	if err != nil {
+		t.Fatalf("OpenReader failed: %v", err)
+	}
+
+	_, err = iso.ReadFile(FileInfo{Path: "/HUGE.BIN", LBA: 20, Size: DefaultReadFileSizeLimit + 1})
+	if err == nil {
+		t.Fatal("ReadFile() should reject sizes above DefaultReadFileSizeLimit")
+	}
+	if !errors.Is(err, ErrInvalidISO) {
+		t.Errorf("ReadFile() error = %v, want ErrInvalidISO", err)
 	}
 }
 

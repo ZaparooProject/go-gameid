@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// Copyright (c) 2026 Niema Moshiri and The Zaparoo Project.
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // This file is part of go-gameid.
@@ -23,9 +23,25 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/ZaparooProject/go-gameid/iso9660"
 )
+
+var playStationSerialPrefixes = map[string]struct{}{
+	"PAPX": {},
+	"PBPX": {},
+	"PCPX": {},
+	"SCES": {},
+	"SCPS": {},
+	"SCUS": {},
+	"SLES": {},
+	"SLKA": {},
+	"SLPM": {},
+	"SLPS": {},
+	"SLUS": {},
+	"TCPS": {},
+}
 
 // playstationISO is the interface for PlayStation disc images.
 type playstationISO interface {
@@ -92,14 +108,21 @@ func identifyPlayStation(
 	// Try to find serial from root files using ID prefixes
 	serial := findPlayStationSerial(rootFiles, console, database)
 
-	// Fallback to volume ID
+	// Fallback to volume ID. Unlike upstream GameID this is accepted without
+	// a database match: the volume ID is read from the disc itself, so an
+	// image and the physical disc it was dumped from still agree on it.
 	if serial == "" {
 		serial = serialFromVolumeID(iso.GetVolumeID())
 	}
 
-	// Fallback to filename
-	if serial == "" && sourcePath != "" {
-		serial = serialFromFilename(sourcePath)
+	// Fallback to filename, only when the database confirms it is a real
+	// serial. A bare filename (or "sr0" for a block device) is not an
+	// identifier and would produce junk IDs.
+	if serial == "" && sourcePath != "" && database != nil {
+		candidate := strings.ReplaceAll(serialFromFilename(sourcePath), "-", "_")
+		if _, found := database.LookupByString(console, candidate); found {
+			serial = candidate
+		}
 	}
 
 	result.ID = strings.ReplaceAll(serial, "_", "-")
@@ -118,8 +141,14 @@ func identifyPlayStation(
 	return result, nil
 }
 
-// findPlayStationSerial searches for serial in root files using ID prefixes.
+// findPlayStationSerial searches for serial in root files.
 func findPlayStationSerial(rootFiles []string, console Console, database Database) string {
+	for _, fileName := range rootFiles {
+		if serial := serialFromRootFile(fileName); serial != "" {
+			return serial
+		}
+	}
+
 	if database == nil {
 		return ""
 	}
@@ -131,6 +160,61 @@ func findPlayStationSerial(rootFiles []string, console Console, database Databas
 		}
 	}
 	return ""
+}
+
+// serialFromRootFile extracts PlayStation serials from executable names in the disc root.
+func serialFromRootFile(fileName string) string {
+	name := strings.ToUpper(filepath.Base(fileName))
+	if idx := strings.Index(name, ";"); idx != -1 {
+		name = name[:idx]
+	}
+	name = strings.TrimSpace(name)
+	if len(name) < 9 {
+		return ""
+	}
+
+	prefix := name[:4]
+	if _, ok := playStationSerialPrefixes[prefix]; !ok {
+		return ""
+	}
+
+	pos := 4
+	if pos < len(name) && isSerialSeparator(rune(name[pos])) {
+		pos++
+	}
+
+	firstDigits, firstOK := consumeDigits(name, pos, 3)
+	if !firstOK {
+		return ""
+	}
+	pos += len(firstDigits)
+
+	if pos < len(name) && isSerialSeparator(rune(name[pos])) {
+		pos++
+	}
+
+	secondDigits, secondOK := consumeDigits(name, pos, 2)
+	if !secondOK {
+		return ""
+	}
+
+	return prefix + "_" + firstDigits + secondDigits
+}
+
+func consumeDigits(value string, start, count int) (string, bool) {
+	if start+count > len(value) {
+		return "", false
+	}
+	for pos := start; pos < start+count; pos++ {
+		if !unicode.IsDigit(rune(value[pos])) {
+			return "", false
+		}
+	}
+	return value[start : start+count], true
+}
+
+func isSerialSeparator(value rune) bool {
+	return value == '_' || value == '-' || value == '.' || unicode.IsSpace(value)
 }
 
 // findSerialWithPrefix searches for a serial matching the given prefix.

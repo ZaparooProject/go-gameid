@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// Copyright (c) 2026 Niema Moshiri and The Zaparoo Project.
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // This file is part of go-gameid.
@@ -33,18 +33,9 @@ func createN64HeaderBigEndian(cartID, countryCode, title string) []byte {
 	header[2] = 0x12
 	header[3] = 0x40
 
-	// Title at 0x20 (20 bytes)
-	titleBytes := []byte(title)
-	if len(titleBytes) > 20 {
-		titleBytes = titleBytes[:20]
-	}
-	for idx := range 20 {
-		if idx < len(titleBytes) {
-			header[0x20+idx] = titleBytes[idx]
-		} else {
-			header[0x20+idx] = ' '
-		}
-	}
+	// Title at 0x20 (20 bytes, space-padded)
+	titleBytes := append([]byte(title), bytes.Repeat([]byte{' '}, 20)...)
+	copy(header[0x20:0x34], titleBytes[:20])
 
 	// Cartridge ID at 0x3C (2 bytes)
 	if len(cartID) >= 2 {

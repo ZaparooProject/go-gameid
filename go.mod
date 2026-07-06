@@ -1,6 +1,6 @@
 module github.com/ZaparooProject/go-gameid
 
-go 1.24.11
+go 1.26.4
 
 require (
 	github.com/bodgit/sevenzip v1.6.1

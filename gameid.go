@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// Copyright (c) 2026 Niema Moshiri and The Zaparoo Project.
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // This file is part of go-gameid.
@@ -22,6 +22,7 @@
 package gameid
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -137,12 +138,11 @@ func IdentifyWithConsole(path string, console Console, db *GameDatabase) (*Resul
 		return identifyFromDirectory(path, console, dbInterface)
 	}
 
-	// Check if this identifier needs the file path (disc-based games)
-	if pid, ok := id.(pathIdentifier); ok {
-		result, pathErr := pid.IdentifyFromPath(path, dbInterface)
-		if pathErr != nil {
-			return nil, fmt.Errorf("identify from path: %w", pathErr)
-		}
+	result, handled, pathErr := identifyFromPathIfSupported(id, path, dbInterface)
+	if pathErr != nil {
+		return nil, pathErr
+	}
+	if handled {
 		return result, nil
 	}
 
@@ -163,6 +163,28 @@ func IdentifyWithConsole(path string, console Console, db *GameDatabase) (*Resul
 		return nil, fmt.Errorf("identify: %w", idErr)
 	}
 	return result, nil
+}
+
+func identifyFromPathIfSupported(
+	ident identifier.Identifier,
+	path string,
+	database identifier.Database,
+) (result *Result, handled bool, err error) {
+	pid, ok := ident.(pathIdentifier)
+	if !ok {
+		return nil, false, nil
+	}
+
+	result, err = pid.IdentifyFromPath(path, database)
+	if err == nil {
+		return result, true, nil
+	}
+
+	var notSupported identifier.NotSupportedError
+	if errors.As(err, &notSupported) {
+		return nil, false, nil
+	}
+	return nil, false, fmt.Errorf("identify from path: %w", err)
 }
 
 // identifyFromDirectory identifies a game from a mounted disc directory.
@@ -281,14 +303,15 @@ func IsCartridgeBased(console Console) bool {
 //
 //nolint:revive // Line length acceptable for function signature with ignored parameter
 func identifyFromBlockDevice(path string, _ Console, ident identifier.Identifier, database identifier.Database) (*Result, error) {
-	// For disc-based consoles, use IdentifyFromPath which handles block devices
-	if pid, ok := ident.(pathIdentifier); ok {
-		result, err := pid.IdentifyFromPath(path, database)
-		if err != nil {
-			return nil, fmt.Errorf("identify from path: %w", err)
-		}
+	// For disc-based consoles, use IdentifyFromPath which handles block devices.
+	result, handled, pathErr := identifyFromPathIfSupported(ident, path, database)
+	if pathErr != nil {
+		return nil, pathErr
+	}
+	if handled {
 		return result, nil
 	}
+	// Fall through to raw block device reading when path identification is unsupported.
 
 	// Open block device directly
 	blockDev, err := os.Open(path) //nolint:gosec // Path from user input is expected for block device
@@ -302,11 +325,11 @@ func identifyFromBlockDevice(path string, _ Console, ident identifier.Identifier
 	// Most identifiers only need the first few KB
 	size := int64(700 * 1024 * 1024) // 700MB typical CD size
 
-	result, err := ident.Identify(blockDev, size, database)
+	identified, err := ident.Identify(blockDev, size, database)
 	if err != nil {
 		return nil, fmt.Errorf("identify: %w", err)
 	}
-	return result, nil
+	return identified, nil
 }
 
 // identifyFromArchive identifies a game file inside an archive.

@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// Copyright (c) 2026 Niema Moshiri and The Zaparoo Project.
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // This file is part of go-gameid.
@@ -203,6 +203,25 @@ func TestSegaCDIdentifier_InvalidMagic(t *testing.T) {
 	_, err := identifier.Identify(reader, int64(len(header)), nil)
 	if err == nil {
 		t.Error("expected error for invalid magic word, got nil")
+	}
+}
+
+func TestSegaCDIdentifier_MagicWordNearEndOfHeader(t *testing.T) {
+	t.Parallel()
+
+	identifier := NewSegaCDIdentifier()
+
+	// A magic word appearing near the end of the 0x300 search window (as can
+	// happen with corrupt data or a non-SegaCD disc) must not cause the field
+	// parsers to slice past the header.
+	header := make([]byte, 0x300)
+	copy(header[0x2F0:], "SEGADISC")
+
+	reader := bytes.NewReader(header)
+
+	if _, err := identifier.Identify(reader, int64(len(header)), nil); err != nil {
+		// An error is acceptable; a panic is not.
+		t.Logf("Identify() returned error (acceptable): %v", err)
 	}
 }
 

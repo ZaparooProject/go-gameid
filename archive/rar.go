@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// Copyright (c) 2026 Niema Moshiri and The Zaparoo Project.
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // This file is part of go-gameid.
@@ -60,7 +60,7 @@ func (ra *RARArchive) List() ([]FileInfo, error) {
 		return nil, fmt.Errorf("create RAR reader: %w", err)
 	}
 
-	var files []FileInfo //nolint:prealloc // RAR file count unknown until full scan
+	var files []FileInfo
 	for {
 		header, err := reader.Next()
 		if errors.Is(err, io.EOF) {
