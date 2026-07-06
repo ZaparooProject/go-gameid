@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// Copyright (c) 2026 Niema Moshiri and The Zaparoo Project.
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // This file is part of go-gameid.
@@ -112,10 +112,10 @@ func codecTagToString(tag uint32) string {
 		return "none"
 	}
 	tagBytes := []byte{
-		byte(tag >> 24),
-		byte(tag >> 16),
-		byte(tag >> 8),
-		byte(tag),
+		byte(tag >> 24 & 0xFF),
+		byte(tag >> 16 & 0xFF),
+		byte(tag >> 8 & 0xFF),
+		byte(tag & 0xFF),
 	}
 	return string(tagBytes)
 }

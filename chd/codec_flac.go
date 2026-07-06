@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// Copyright (c) 2026 Niema Moshiri and The Zaparoo Project.
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // This file is part of go-gameid.
@@ -76,8 +76,8 @@ func writeFLACFrameSamples(audioFrame *frame.Frame, dst []byte, offset int) int 
 		for ch := range numChannels {
 			sample := audioFrame.Subframes[ch].Samples[i]
 			if offset+2 <= len(dst) {
-				dst[offset] = byte(sample >> 8)
-				dst[offset+1] = byte(sample)
+				dst[offset] = byte(sample >> 8 & 0xFF)
+				dst[offset+1] = byte(sample & 0xFF)
 				offset += 2
 			}
 		}
@@ -198,18 +198,18 @@ func buildFLACHeader(sampleRate uint32, numChannels uint8, blockSize uint16) []b
 	copy(header, flacHeaderTemplate)
 
 	// Patch block sizes at offsets 0x08 and 0x0A (big-endian 16-bit)
-	header[0x08] = byte(blockSize >> 8)
-	header[0x09] = byte(blockSize)
-	header[0x0A] = byte(blockSize >> 8)
-	header[0x0B] = byte(blockSize)
+	header[0x08] = byte(blockSize >> 8 & 0xFF)
+	header[0x09] = byte(blockSize & 0xFF)
+	header[0x0A] = byte(blockSize >> 8 & 0xFF)
+	header[0x0B] = byte(blockSize & 0xFF)
 
 	// Patch sample rate, channels, bits at offset 0x12 (big-endian 24-bit)
 	// Format: (sample_rate << 4) | ((num_channels - 1) << 1) | (bits_per_sample - 1 >> 4)
 	// For 16-bit audio: bits_per_sample = 16, so (16-1) >> 4 = 0
 	val := (sampleRate << 4) | (uint32(numChannels-1) << 1)
-	header[0x12] = byte(val >> 16)
-	header[0x13] = byte(val >> 8)
-	header[0x14] = byte(val)
+	header[0x12] = byte(val >> 16 & 0xFF)
+	header[0x13] = byte(val >> 8 & 0xFF)
+	header[0x14] = byte(val & 0xFF)
 
 	return header
 }

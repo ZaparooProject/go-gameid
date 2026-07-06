@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// Copyright (c) 2026 Niema Moshiri and The Zaparoo Project.
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // This file is part of go-gameid.
@@ -143,6 +143,35 @@ func TestSerialFromFilename(t *testing.T) {
 	}
 }
 
+func TestSerialFromRootFile(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		fileName string
+		want     string
+	}{
+		{"underscore dotted", "SLUS_123.45", "SLUS_12345"},
+		{"version suffix", "SCUS_123.45;1", "SCUS_12345"},
+		{"hyphen compact", "SLES-12345", "SLES_12345"},
+		{"compact", "SCES12345", "SCES_12345"},
+		{"lowercase", "slpm_123.45", "SLPM_12345"},
+		{"unknown prefix", "GAME_123.45", ""},
+		{"not enough digits", "SLUS_123.4", ""},
+		{"non digit", "SLUS_ABC.DE", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := serialFromRootFile(tt.fileName)
+			if got != tt.want {
+				t.Errorf("serialFromRootFile(%q) = %q, want %q", tt.fileName, got, tt.want)
+			}
+		})
+	}
+}
+
 // Tests for findPlayStationSerial
 func TestFindPlayStationSerial(t *testing.T) {
 	t.Parallel()
@@ -150,8 +179,8 @@ func TestFindPlayStationSerial(t *testing.T) {
 	t.Run("nil database", func(t *testing.T) {
 		t.Parallel()
 		got := findPlayStationSerial([]string{"SLUS_123.45"}, ConsolePSX, nil)
-		if got != "" {
-			t.Errorf("findPlayStationSerial with nil db = %q, want empty", got)
+		if got != "SLUS_12345" {
+			t.Errorf("findPlayStationSerial with nil db = %q, want %q", got, "SLUS_12345")
 		}
 	})
 
@@ -159,7 +188,7 @@ func TestFindPlayStationSerial(t *testing.T) {
 		t.Parallel()
 		db := newMockDatabase()
 		// No prefixes set
-		got := findPlayStationSerial([]string{"SLUS_123.45"}, ConsolePSX, db)
+		got := findPlayStationSerial([]string{"README.TXT"}, ConsolePSX, db)
 		if got != "" {
 			t.Errorf("findPlayStationSerial with no prefixes = %q, want empty", got)
 		}
@@ -296,24 +325,6 @@ func TestIdentifyPlayStation(t *testing.T) {
 		}
 	})
 
-	t.Run("filename fallback", func(t *testing.T) {
-		t.Parallel()
-		mockISO := &mockPlayStationISO{
-			uuid:     "",
-			volumeID: "",
-			files:    []iso9660.FileInfo{},
-		}
-
-		result, err := identifyPlayStation(mockISO, ConsolePSX, nil, "/games/SLPM-12345.iso")
-		if err != nil {
-			t.Fatalf("identifyPlayStation() error = %v", err)
-		}
-
-		if result.ID != "SLPM-12345" {
-			t.Errorf("result.ID = %q, want %q", result.ID, "SLPM-12345")
-		}
-	})
-
 	t.Run("IterFiles error", func(t *testing.T) {
 		t.Parallel()
 		mockISO := &mockPlayStationISO{
@@ -355,6 +366,51 @@ func TestIdentifyPlayStation(t *testing.T) {
 }
 
 // Tests for PSXIdentifier
+func TestIdentifyPlayStation_FilenameFallbackWithDatabase(t *testing.T) {
+	t.Parallel()
+
+	db := newMockDatabase()
+	db.addEntry(ConsolePSX, "SLPM_12345", map[string]string{
+		"title": "Test Game",
+	})
+	mockISO := &mockPlayStationISO{
+		uuid:     "",
+		volumeID: "",
+		files:    []iso9660.FileInfo{},
+	}
+
+	result, err := identifyPlayStation(mockISO, ConsolePSX, db, "/games/SLPM-12345.iso")
+	if err != nil {
+		t.Fatalf("identifyPlayStation() error = %v", err)
+	}
+
+	if result.ID != "SLPM-12345" {
+		t.Errorf("result.ID = %q, want %q", result.ID, "SLPM-12345")
+	}
+}
+
+func TestIdentifyPlayStation_FilenameFallbackWithoutDatabase(t *testing.T) {
+	t.Parallel()
+
+	mockISO := &mockPlayStationISO{
+		uuid:     "",
+		volumeID: "",
+		files:    []iso9660.FileInfo{},
+	}
+
+	// A block device path must not become the ID ("sr0"), and neither should
+	// an arbitrary image filename when nothing confirms it.
+	for _, sourcePath := range []string{"/dev/sr0", "/games/SLPM-12345.iso"} {
+		result, err := identifyPlayStation(mockISO, ConsolePSX, nil, sourcePath)
+		if err != nil {
+			t.Fatalf("identifyPlayStation(%q) error = %v", sourcePath, err)
+		}
+		if result.ID != "" {
+			t.Errorf("identifyPlayStation(%q) ID = %q, want empty", sourcePath, result.ID)
+		}
+	}
+}
+
 func TestPSXIdentifier_Console(t *testing.T) {
 	t.Parallel()
 

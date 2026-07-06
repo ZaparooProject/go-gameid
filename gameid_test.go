@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// Copyright (c) 2026 Niema Moshiri and The Zaparoo Project.
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // This file is part of go-gameid.
@@ -206,6 +206,32 @@ func TestIdentifyWithConsole(t *testing.T) {
 
 	if result.InternalTitle != "TESTGAME" {
 		t.Errorf("InternalTitle = %q, want %q", result.InternalTitle, "TESTGAME")
+	}
+}
+
+func TestIdentifyWithConsole_GCPlainFile(t *testing.T) {
+	t.Parallel()
+
+	// GameCube's IdentifyFromPath only handles CHD; plain .gcm/.iso files must
+	// fall back to reader-based identification instead of erroring out.
+	header := make([]byte, 0x440)
+	copy(header[0x0000:], "GALE")
+	copy(header[0x0004:], "01")
+	copy(header[0x001C:], []byte{0xC2, 0x33, 0x9F, 0x3D})
+	copy(header[0x0020:], "Test Game")
+
+	path := filepath.Join(t.TempDir(), "game.gcm")
+	if err := os.WriteFile(path, header, 0o600); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	result, err := IdentifyWithConsole(path, ConsoleGC, nil)
+	if err != nil {
+		t.Fatalf("IdentifyWithConsole() error = %v", err)
+	}
+
+	if result.ID != "GALE" {
+		t.Errorf("ID = %q, want %q", result.ID, "GALE")
 	}
 }
 

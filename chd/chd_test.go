@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// Copyright (c) 2026 Niema Moshiri and The Zaparoo Project.
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // This file is part of go-gameid.
@@ -1070,7 +1070,9 @@ func TestNeoGeoCDCHD(t *testing.T) {
 		codecName := "?"
 		if int(entry.CompType) < len(header.Compressors) {
 			tag := header.Compressors[entry.CompType]
-			codecName = string([]byte{byte(tag >> 24), byte(tag >> 16), byte(tag >> 8), byte(tag)})
+			codecName = string([]byte{
+				byte(tag >> 24 & 0xFF), byte(tag >> 16 & 0xFF), byte(tag >> 8 & 0xFF), byte(tag & 0xFF),
+			})
 		}
 		t.Logf("Hunk %d: CompType=%d (%s), CompLength=%d, Offset=%d",
 			idx, entry.CompType, codecName, entry.CompLength, entry.Offset)

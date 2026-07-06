@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// Copyright (c) 2026 Niema Moshiri and The Zaparoo Project.
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // This file is part of go-gameid.
@@ -22,6 +22,7 @@
 package gameid
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -140,10 +141,16 @@ func IdentifyWithConsole(path string, console Console, db *GameDatabase) (*Resul
 	// Check if this identifier needs the file path (disc-based games)
 	if pid, ok := id.(pathIdentifier); ok {
 		result, pathErr := pid.IdentifyFromPath(path, dbInterface)
-		if pathErr != nil {
+		if pathErr == nil {
+			return result, nil
+		}
+		// Identifiers like GameCube only need the path for specific container
+		// formats (CHD) and report NotSupportedError otherwise; fall through
+		// to reader-based identification for plain files.
+		var notSupported identifier.NotSupportedError
+		if !errors.As(pathErr, &notSupported) {
 			return nil, fmt.Errorf("identify from path: %w", pathErr)
 		}
-		return result, nil
 	}
 
 	// Open file and identify using reader
@@ -284,10 +291,14 @@ func identifyFromBlockDevice(path string, _ Console, ident identifier.Identifier
 	// For disc-based consoles, use IdentifyFromPath which handles block devices
 	if pid, ok := ident.(pathIdentifier); ok {
 		result, err := pid.IdentifyFromPath(path, database)
-		if err != nil {
+		if err == nil {
+			return result, nil
+		}
+		var notSupported identifier.NotSupportedError
+		if !errors.As(err, &notSupported) {
 			return nil, fmt.Errorf("identify from path: %w", err)
 		}
-		return result, nil
+		// Fall through to raw block device reading below.
 	}
 
 	// Open block device directly

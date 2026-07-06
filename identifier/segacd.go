@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// Copyright (c) 2026 Niema Moshiri and The Zaparoo Project.
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // This file is part of go-gameid.
@@ -269,6 +269,9 @@ func parseSegaCDBuildDate(raw string) string {
 // parseSegaCDDeviceSupport extracts device support codes from header.
 func parseSegaCDDeviceSupport(header []byte, magicIdx int) []string {
 	var deviceSupport []string
+	if magicIdx+0x1A0 > len(header) {
+		return deviceSupport
+	}
 	deviceSupportBytes := header[magicIdx+0x190 : magicIdx+0x1A0]
 	for _, b := range deviceSupportBytes {
 		if b == 0 || b == ' ' {

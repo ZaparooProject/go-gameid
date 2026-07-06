@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Niema Moshiri and The Zaparoo Project.
+// Copyright (c) 2026 Niema Moshiri and The Zaparoo Project.
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // This file is part of go-gameid.
@@ -84,6 +84,20 @@ func Open(path string) (*ISO9660, error) {
 		size:   info.Size(),
 	}
 
+	// Block devices (e.g. /dev/sr0) report a stat size of 0; the kernel
+	// exposes cooked 2048-byte sectors, so seek to find the real size and
+	// pin the block size rather than guessing it from the size.
+	if info.Mode()&os.ModeDevice != 0 && info.Mode()&os.ModeCharDevice == 0 {
+		end, seekErr := isoFile.Seek(0, io.SeekEnd)
+		if seekErr != nil {
+			_ = isoFile.Close()
+
+			return nil, fmt.Errorf("seek block device end: %w", seekErr)
+		}
+		iso.size = end
+		iso.blockSize = 2048
+	}
+
 	if err := iso.init(); err != nil {
 		_ = isoFile.Close()
 
@@ -118,18 +132,26 @@ func OpenReaderWithCloser(reader io.ReaderAt, size int64, closer io.Closer) (*IS
 	return iso, nil
 }
 
-// init initializes the ISO9660 structure by finding PVD and parsing path table.
-func (iso *ISO9660) init() error {
-	// Determine block size from file size
+// detectBlockSize guesses the sector size of a disc image from its total size.
+func detectBlockSize(size int64) int {
 	switch {
-	case iso.size%2352 == 0:
-		iso.blockSize = 2352
-	case iso.size%2048 == 0:
-		iso.blockSize = 2048
+	case size%2352 == 0:
+		return 2352
+	case size%2048 == 0:
+		return 2048
 	default:
 		// For CHD sources, block size may not divide evenly
 		// Default to 2048 for ISO9660 standard
-		iso.blockSize = 2048
+		return 2048
+	}
+}
+
+// init initializes the ISO9660 structure by finding PVD and parsing path table.
+func (iso *ISO9660) init() error {
+	// Determine block size from file size unless the caller already knows it
+	// (block devices always expose 2048-byte sectors).
+	if iso.blockSize == 0 {
+		iso.blockSize = detectBlockSize(iso.size)
 	}
 
 	// Search for PVD in first ~1MB
@@ -372,8 +394,17 @@ func (iso *ISO9660) IterFiles(onlyRootDir bool) ([]FileInfo, error) {
 	return files, nil
 }
 
+// maxReadFileSize caps ReadFile allocations. Directory records store sizes as
+// uint32, so a corrupt or malicious image can claim up to 4GB for a file;
+// identification only ever reads small files, so refuse anything larger.
+const maxReadFileSize = 16 * 1024 * 1024
+
 // ReadFile reads the contents of a file by its FileInfo.
 func (iso *ISO9660) ReadFile(info FileInfo) ([]byte, error) {
+	if info.Size > maxReadFileSize {
+		return nil, fmt.Errorf("%w: file %s claims %d bytes (max %d)",
+			ErrInvalidISO, info.Path, info.Size, maxReadFileSize)
+	}
 	offset := iso.blockOffset + int64(info.LBA)*int64(iso.blockSize)
 	data := make([]byte, info.Size)
 	if _, err := iso.reader.ReadAt(data, offset); err != nil && err != io.EOF {
