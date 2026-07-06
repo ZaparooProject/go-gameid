@@ -565,9 +565,9 @@ func TestReadFileSizeCap(t *testing.T) {
 		t.Fatalf("OpenReader failed: %v", err)
 	}
 
-	_, err = iso.ReadFile(FileInfo{Path: "/HUGE.BIN", LBA: 20, Size: maxReadFileSize + 1})
+	_, err = iso.ReadFile(FileInfo{Path: "/HUGE.BIN", LBA: 20, Size: DefaultReadFileSizeLimit + 1})
 	if err == nil {
-		t.Fatal("ReadFile() should reject sizes above maxReadFileSize")
+		t.Fatal("ReadFile() should reject sizes above DefaultReadFileSizeLimit")
 	}
 	if !errors.Is(err, ErrInvalidISO) {
 		t.Errorf("ReadFile() error = %v, want ErrInvalidISO", err)

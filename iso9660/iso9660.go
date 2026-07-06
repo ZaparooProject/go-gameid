@@ -394,16 +394,21 @@ func (iso *ISO9660) IterFiles(onlyRootDir bool) ([]FileInfo, error) {
 	return files, nil
 }
 
-// maxReadFileSize caps ReadFile allocations. Directory records store sizes as
-// uint32, so a corrupt or malicious image can claim up to 4GB for a file;
-// identification only ever reads small files, so refuse anything larger.
-const maxReadFileSize = 16 * 1024 * 1024
+// DefaultReadFileSizeLimit caps ReadFile allocations. Directory records store
+// sizes as uint32, so corrupt images can claim up to 4GB for a file.
+const DefaultReadFileSizeLimit uint32 = 16 * 1024 * 1024
 
 // ReadFile reads the contents of a file by its FileInfo.
 func (iso *ISO9660) ReadFile(info FileInfo) ([]byte, error) {
-	if info.Size > maxReadFileSize {
+	return iso.ReadFileWithLimit(info, DefaultReadFileSizeLimit)
+}
+
+// ReadFileWithLimit reads the contents of a file with a caller-provided size limit.
+// A limit of 0 disables the guard.
+func (iso *ISO9660) ReadFileWithLimit(info FileInfo, maxSize uint32) ([]byte, error) {
+	if maxSize > 0 && info.Size > maxSize {
 		return nil, fmt.Errorf("%w: file %s claims %d bytes (max %d)",
-			ErrInvalidISO, info.Path, info.Size, maxReadFileSize)
+			ErrInvalidISO, info.Path, info.Size, maxSize)
 	}
 	offset := iso.blockOffset + int64(info.LBA)*int64(iso.blockSize)
 	data := make([]byte, info.Size)
