@@ -91,13 +91,17 @@ func writeRootDirectory(tb testing.TB, data []byte, files []File) {
 
 	recordOffset := rootOffset + 68
 	for idx, file := range files {
+		recordLen := DirectoryRecordLength(file.Name)
+		if recordOffset+recordLen > rootOffset+BlockSize {
+			tb.Fatalf("test ISO root directory records exceed one block at file %s", file.Name)
+		}
 		if len(file.Data) > BlockSize {
 			tb.Fatalf("test ISO file %s is %d bytes, max one block (%d)", file.Name, len(file.Data), BlockSize)
 		}
 		fileLBA := 20 + idx
 		WriteFileRecord(tb, data[recordOffset:], fileLBA, len(file.Data), file.Name)
 		copy(data[fileLBA*BlockSize:fileLBA*BlockSize+len(file.Data)], file.Data)
-		recordOffset += DirectoryRecordLength(file.Name)
+		recordOffset += recordLen
 	}
 }
 
@@ -120,6 +124,9 @@ func writeRecord(tb testing.TB, record []byte, lba, size int, name string) {
 	tb.Helper()
 
 	recLen := DirectoryRecordLength(name)
+	if len(record) < recLen {
+		tb.Fatalf("test ISO directory record buffer for %s is %d bytes, need %d", name, len(record), recLen)
+	}
 	record[0] = mustByte(tb, recLen)
 	binary.LittleEndian.PutUint32(record[2:], mustUint32(tb, lba))
 	binary.BigEndian.PutUint32(record[6:], mustUint32(tb, lba))
