@@ -22,10 +22,13 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ZaparooProject/go-gameid/internal/testiso"
 )
 
 // createMinimalISO creates a minimal valid ISO9660 image for testing.
@@ -149,6 +152,65 @@ func createMinimalISO(volumeID, systemID, publisherID string) []byte {
 	data[parentOffset+33] = 0x01
 
 	return data
+}
+
+func createMinimalISOWithFiles(t testing.TB, volumeID string, files []testiso.File) []byte {
+	t.Helper()
+
+	return testiso.CreateMinimal(t, volumeID, "SYS", "PUB", files)
+}
+
+type maxReadReaderAt struct {
+	data    []byte
+	maxRead int
+}
+
+func (reader maxReadReaderAt) ReadAt(buffer []byte, off int64) (int, error) {
+	if len(buffer) > reader.maxRead {
+		return 0, errors.New("read too large")
+	}
+	if off >= int64(len(reader.data)) {
+		return 0, io.EOF
+	}
+	bytesRead := copy(buffer, reader.data[off:])
+	if bytesRead < len(buffer) {
+		return bytesRead, io.EOF
+	}
+	return bytesRead, nil
+}
+
+func TestISO9660_OpenReader_ChunkedHeaderScan(t *testing.T) {
+	t.Parallel()
+
+	data := createMinimalISO("TEST", "PLAYSTATION", "")
+	iso, err := OpenReader(maxReadReaderAt{data: data, maxRead: 2048}, int64(len(data)))
+	if err != nil {
+		t.Fatalf("OpenReader() error = %v", err)
+	}
+	defer func() { _ = iso.Close() }()
+
+	if got := iso.GetVolumeID(); !strings.HasPrefix(got, "TEST") {
+		t.Errorf("GetVolumeID() = %q, want prefix %q", got, "TEST")
+	}
+}
+
+func TestISO9660_OpenReader_HeaderScanAcrossChunkBoundary(t *testing.T) {
+	t.Parallel()
+
+	const prefixSize = 2045
+	data := append(bytes.Repeat([]byte{0xff}, prefixSize), createMinimalISO("OFFSET", "PLAYSTATION", "")...)
+	iso, err := OpenReader(maxReadReaderAt{data: data, maxRead: 2048}, int64(len(data)))
+	if err != nil {
+		t.Fatalf("OpenReader() error = %v", err)
+	}
+	defer func() { _ = iso.Close() }()
+
+	if iso.blockOffset != prefixSize {
+		t.Errorf("blockOffset = %d, want %d", iso.blockOffset, prefixSize)
+	}
+	if got := iso.GetVolumeID(); !strings.HasPrefix(got, "OFFSET") {
+		t.Errorf("GetVolumeID() = %q, want prefix %q", got, "OFFSET")
+	}
 }
 
 //nolint:gosec // G306 permissions ok for tests
@@ -348,6 +410,67 @@ func TestISO9660_IterFiles(t *testing.T) {
 
 	// Should return empty list for minimal ISO
 	_ = files // We just verify it doesn't error
+}
+
+func TestISO9660_WalkFilesStopsEarlyAndReadFileByPath(t *testing.T) {
+	t.Parallel()
+
+	isoData := createMinimalISOWithFiles(t, "VOL", []testiso.File{
+		{Name: "FIRST.TXT;1", Data: []byte("first file")},
+		{Name: "SECOND.TXT;1", Data: []byte("second file")},
+	})
+	iso, err := OpenReader(bytes.NewReader(isoData), int64(len(isoData)))
+	if err != nil {
+		t.Fatalf("OpenReader() error = %v", err)
+	}
+	defer func() { _ = iso.Close() }()
+
+	visited := make([]string, 0)
+	err = iso.WalkFiles(true, func(file FileInfo) bool {
+		visited = append(visited, file.Path)
+		return false
+	})
+	if err != nil {
+		t.Fatalf("WalkFiles() error = %v", err)
+	}
+	if len(visited) != 1 || visited[0] != "/FIRST.TXT;1" {
+		t.Fatalf("visited = %v, want [/FIRST.TXT;1]", visited)
+	}
+
+	data, err := iso.ReadFileByPath("first.txt")
+	if err != nil {
+		t.Fatalf("ReadFileByPath() error = %v", err)
+	}
+	if string(data) != "first file" {
+		t.Errorf("ReadFileByPath() = %q, want %q", data, "first file")
+	}
+	if !iso.FileExists("/FIRST.TXT") {
+		t.Error("FileExists() should find file without ISO9660 version suffix")
+	}
+}
+
+func TestISO9660_WalkFilesReturnsDirectoryReadError(t *testing.T) {
+	t.Parallel()
+
+	isoData := createMinimalISOWithFiles(t, "VOL", []testiso.File{
+		{Name: "BROKEN.TXT;1", Data: []byte("data")},
+	})
+	iso, err := OpenReader(bytes.NewReader(isoData), int64(len(isoData)))
+	if err != nil {
+		t.Fatalf("OpenReader() error = %v", err)
+	}
+	iso.reader = maxReadReaderAt{data: isoData, maxRead: 1}
+
+	_, err = iso.ReadFileByPath("BROKEN.TXT")
+	if err == nil {
+		t.Fatal("ReadFileByPath() should return directory read error")
+	}
+	if errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("ReadFileByPath() error = %v, want underlying directory read error", err)
+	}
+	if !strings.Contains(err.Error(), "read directory record") {
+		t.Errorf("ReadFileByPath() error = %v, want directory record read error", err)
+	}
 }
 
 func TestISO9660_ReadFileByPath_NotFound(t *testing.T) {
@@ -630,5 +753,95 @@ func TestISO9660_TruncatedPathTable(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "truncated path table entry") {
 		t.Errorf("Open() error = %v, want error containing 'truncated path table entry'", err)
+	}
+}
+
+func TestISO9660_InvalidPathTableParent(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	isoData := createMinimalISO("VOL", "SYS", "PUB")
+
+	const blockSize = 2048
+	pvdOffset := 16 * blockSize
+	pathTableOffset := 18 * blockSize
+	pathTableSize := uint32(22)
+	binary.LittleEndian.PutUint32(isoData[pvdOffset+132:], pathTableSize)
+	binary.BigEndian.PutUint32(isoData[pvdOffset+136:], pathTableSize)
+
+	childOffset := pathTableOffset + 10
+	isoData[childOffset] = 4
+	isoData[childOffset+1] = 0
+	binary.LittleEndian.PutUint32(isoData[childOffset+2:], 19)
+	binary.LittleEndian.PutUint16(isoData[childOffset+6:], 2)
+	copy(isoData[childOffset+8:], "LOOP")
+
+	isoPath := filepath.Join(tmpDir, "invalid-parent.iso")
+	if err := os.WriteFile(isoPath, isoData, 0o600); err != nil {
+		t.Fatalf("Failed to write ISO: %v", err)
+	}
+
+	_, err := Open(isoPath)
+	if err == nil {
+		t.Fatal("Open() should error for invalid path table parent")
+	}
+	if !strings.Contains(err.Error(), "invalid path table parent index") {
+		t.Errorf("Open() error = %v, want error containing 'invalid path table parent index'", err)
+	}
+}
+
+func TestISO9660_PathTableSizeExceedsImage(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	isoData := createMinimalISO("VOL", "SYS", "PUB")
+
+	const blockSize = 2048
+	pvdOffset := 16 * blockSize
+	pathTableSize := uint32(999999)
+	binary.LittleEndian.PutUint32(isoData[pvdOffset+132:], pathTableSize)
+	binary.BigEndian.PutUint32(isoData[pvdOffset+136:], pathTableSize)
+
+	isoPath := filepath.Join(tmpDir, "oversize-path-table.iso")
+	if err := os.WriteFile(isoPath, isoData, 0o600); err != nil {
+		t.Fatalf("Failed to write ISO: %v", err)
+	}
+
+	_, err := Open(isoPath)
+	if err == nil {
+		t.Fatal("Open() should error for oversized path table")
+	}
+	if !strings.Contains(err.Error(), "path table size") {
+		t.Errorf("Open() error = %v, want error containing 'path table size'", err)
+	}
+}
+
+func TestISO9660_IterFilesShortDirectoryRecord(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	isoData := createMinimalISO("VOL", "SYS", "PUB")
+
+	const blockSize = 2048
+	rootOffset := 19 * blockSize
+	isoData[rootOffset] = 17
+
+	isoPath := filepath.Join(tmpDir, "short-record.iso")
+	if err := os.WriteFile(isoPath, isoData, 0o600); err != nil {
+		t.Fatalf("Failed to write ISO: %v", err)
+	}
+
+	iso, err := Open(isoPath)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer func() { _ = iso.Close() }()
+
+	_, err = iso.IterFiles(true)
+	if err == nil {
+		t.Fatal("IterFiles() should error for short directory record")
+	}
+	if !strings.Contains(err.Error(), "invalid directory record length") {
+		t.Errorf("IterFiles() error = %v, want error containing 'invalid directory record length'", err)
 	}
 }

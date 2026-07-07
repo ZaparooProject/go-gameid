@@ -74,17 +74,17 @@ func identifyPSPFromISO(iso *iso9660.ISO9660, database Database) (*Result, error
 	result := NewResult(ConsolePSP)
 
 	// Look for UMD_DATA.BIN in root
-	files, err := iso.IterFiles(true)
+	var umdDataInfo *iso9660.FileInfo
+	err := iso.WalkFiles(true, func(file iso9660.FileInfo) bool {
+		fileName := strings.ToUpper(filepath.Base(cleanISOFileName(file.Path)))
+		if fileName == "UMD_DATA.BIN" {
+			umdDataInfo = &file
+			return false
+		}
+		return true
+	})
 	if err != nil {
 		return nil, fmt.Errorf("iterate files: %w", err)
-	}
-
-	var umdDataInfo *iso9660.FileInfo
-	for _, f := range files {
-		if strings.ToUpper(filepath.Base(f.Path)) == "UMD_DATA.BIN" {
-			umdDataInfo = &f
-			break
-		}
 	}
 
 	if umdDataInfo == nil {

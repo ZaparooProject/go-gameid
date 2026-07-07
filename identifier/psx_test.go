@@ -20,6 +20,7 @@ package identifier
 
 import (
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/ZaparooProject/go-gameid/iso9660"
@@ -39,6 +40,51 @@ func (m *mockPlayStationISO) IterFiles(_ bool) ([]iso9660.FileInfo, error) {
 	return m.files, m.filesErr
 }
 func (*mockPlayStationISO) Close() error { return nil }
+
+type mockWalkingPlayStationISO struct {
+	readData map[string][]byte
+	walkErr  error
+	readErr  error
+	mockPlayStationISO
+	walked int
+	read   int
+}
+
+func (m *mockWalkingPlayStationISO) WalkFiles(_ bool, fn func(iso9660.FileInfo) bool) error {
+	if m.walkErr != nil {
+		return m.walkErr
+	}
+	for _, file := range m.files {
+		m.walked++
+		if !fn(file) {
+			return nil
+		}
+	}
+	return nil
+}
+
+func (m *mockWalkingPlayStationISO) ReadFile(info iso9660.FileInfo) ([]byte, error) {
+	m.read++
+	if m.readErr != nil {
+		return nil, m.readErr
+	}
+	return m.readData[info.Path], nil
+}
+
+type mockReadingPlayStationISO struct {
+	readData map[string][]byte
+	readErr  error
+	mockPlayStationISO
+	read int
+}
+
+func (m *mockReadingPlayStationISO) ReadFile(info iso9660.FileInfo) ([]byte, error) {
+	m.read++
+	if m.readErr != nil {
+		return nil, m.readErr
+	}
+	return m.readData[info.Path], nil
+}
 
 // mockDatabase implements Database for testing.
 type mockDatabase struct {
@@ -85,6 +131,104 @@ func (m *mockDatabase) addEntry(console Console, key string, entry map[string]st
 
 func (m *mockDatabase) setPrefixes(console Console, prefixes []string) {
 	m.idPrefixes[console] = prefixes
+}
+
+func TestSerialFromSystemCNF(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{"boot", "BOOT = cdrom:\\SLUS_005.94;1", "SLUS_00594"},
+		{"boot2", "BOOT2 = cdrom0:\\SLES-123.45;1", "SLES_12345"},
+		{"none", "BOOT = cdrom:\\MAIN.EXE;1", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := serialFromSystemCNF(tt.content); got != tt.want {
+				t.Errorf("serialFromSystemCNF() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPlayStationRootInfo_SystemCNFReaderPaths(t *testing.T) {
+	t.Parallel()
+
+	files := []iso9660.FileInfo{
+		{Path: "/SYSTEM.CNF;1"},
+		{Path: "/README.TXT"},
+	}
+	readData := map[string][]byte{
+		"/SYSTEM.CNF;1": []byte("BOOT2 = cdrom0:\\SLES-123.45;1"),
+	}
+
+	t.Run("walk files dispatch", func(t *testing.T) {
+		t.Parallel()
+		mockISO := &mockWalkingPlayStationISO{
+			mockPlayStationISO: mockPlayStationISO{files: files},
+			readData:           readData,
+		}
+
+		rootFiles, serial, err := playStationRootInfo(mockISO, ConsolePSX, nil)
+		if err != nil {
+			t.Fatalf("playStationRootInfo() error = %v", err)
+		}
+
+		assertPlayStationRootInfo(t, rootFiles, serial, mockISO.walked, mockISO.read)
+	})
+
+	t.Run("walk files direct", func(t *testing.T) {
+		t.Parallel()
+		mockISO := &mockWalkingPlayStationISO{
+			mockPlayStationISO: mockPlayStationISO{files: files},
+			readData:           readData,
+		}
+
+		rootFiles, serial, err := playStationRootInfoWalk(mockISO, mockISO, ConsolePSX, nil)
+		if err != nil {
+			t.Fatalf("playStationRootInfoWalk() error = %v", err)
+		}
+
+		assertPlayStationRootInfo(t, rootFiles, serial, mockISO.walked, mockISO.read)
+	})
+
+	t.Run("iter files", func(t *testing.T) {
+		t.Parallel()
+		mockISO := &mockReadingPlayStationISO{
+			mockPlayStationISO: mockPlayStationISO{files: files},
+			readData:           readData,
+		}
+
+		rootFiles, serial, err := playStationRootInfo(mockISO, ConsolePSX, nil)
+		if err != nil {
+			t.Fatalf("playStationRootInfo() error = %v", err)
+		}
+
+		assertPlayStationRootInfo(t, rootFiles, serial, len(files), mockISO.read)
+	})
+}
+
+func assertPlayStationRootInfo(t *testing.T, rootFiles []string, serial string, walked, read int) {
+	t.Helper()
+
+	if serial != "SLES_12345" {
+		t.Errorf("serial = %q, want %q", serial, "SLES_12345")
+	}
+	wantRootFiles := []string{"SYSTEM.CNF", "README.TXT"}
+	if !slices.Equal(rootFiles, wantRootFiles) {
+		t.Errorf("rootFiles = %v, want %v", rootFiles, wantRootFiles)
+	}
+	if walked != 2 {
+		t.Errorf("visited %d files, want 2", walked)
+	}
+	if read != 1 {
+		t.Errorf("ReadFile called %d times, want 1", read)
+	}
 }
 
 // Tests for serialFromVolumeID
