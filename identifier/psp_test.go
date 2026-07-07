@@ -24,6 +24,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ZaparooProject/go-gameid/internal/testiso"
 )
 
 func TestPSPIdentifier_Console(t *testing.T) {
@@ -60,8 +62,8 @@ func TestPSPIdentifier_IdentifyFromPath_NonExistent(t *testing.T) {
 func TestPSPIdentifier_IdentifyFromPath_UMDData(t *testing.T) {
 	t.Parallel()
 
-	isoData := createIdentifierTestISO("PSPTEST", []testISOFile{
-		{name: "UMD_DATA.BIN;1", data: []byte("UCUS-98765|Example Game")},
+	isoData := testiso.CreateMinimal(t, "PSPTEST", "PLAYSTATION", "", []testiso.File{
+		{Name: "UMD_DATA.BIN;1", Data: []byte("UCUS-98765|Example Game")},
 	})
 	isoPath := filepath.Join(t.TempDir(), "game.iso")
 	if err := os.WriteFile(isoPath, isoData, 0o600); err != nil {

@@ -27,6 +27,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ZaparooProject/go-gameid/internal/testiso"
 )
 
 // createMinimalISO creates a minimal valid ISO9660 image for testing.
@@ -152,66 +154,10 @@ func createMinimalISO(volumeID, systemID, publisherID string) []byte {
 	return data
 }
 
-type isoTestFile struct {
-	name string
-	data []byte
-}
+func createMinimalISOWithFiles(t testing.TB, volumeID string, files []testiso.File) []byte {
+	t.Helper()
 
-func createMinimalISOWithFiles(volumeID string, files []isoTestFile) []byte {
-	const blockSize = 2048
-	base := createMinimalISO(volumeID, "SYS", "PUB")
-	totalBlocks := 20 + len(files)
-	data := make([]byte, totalBlocks*blockSize)
-	copy(data, base)
-
-	pvdOffset := 16 * blockSize
-	binary.LittleEndian.PutUint32(data[pvdOffset+80:], mustUint32(totalBlocks))
-	binary.BigEndian.PutUint32(data[pvdOffset+84:], mustUint32(totalBlocks))
-
-	recordOffset := 19*blockSize + 68
-	for idx, file := range files {
-		fileLBA := 20 + idx
-		writeISOTestFileRecord(data[recordOffset:], fileLBA, len(file.data), file.name)
-		copy(data[fileLBA*blockSize:], file.data)
-		recordOffset += isoTestDirectoryRecordLength(file.name)
-	}
-
-	return data
-}
-
-func writeISOTestFileRecord(record []byte, lba, size int, name string) {
-	recLen := isoTestDirectoryRecordLength(name)
-	record[0] = mustByte(recLen)
-	binary.LittleEndian.PutUint32(record[2:], mustUint32(lba))
-	binary.BigEndian.PutUint32(record[6:], mustUint32(lba))
-	binary.LittleEndian.PutUint32(record[10:], mustUint32(size))
-	binary.BigEndian.PutUint32(record[14:], mustUint32(size))
-	binary.LittleEndian.PutUint16(record[28:], 1)
-	binary.BigEndian.PutUint16(record[30:], 1)
-	record[32] = mustByte(len(name))
-	copy(record[33:], name)
-}
-
-func isoTestDirectoryRecordLength(name string) int {
-	recLen := 33 + len(name)
-	if recLen%2 == 1 {
-		recLen++
-	}
-	return recLen
-}
-
-func mustUint32(value int) uint32 {
-	if value < 0 || value > 1<<32-1 {
-		panic("test ISO value exceeds uint32")
-	}
-	return uint32(value)
-}
-
-func mustByte(value int) byte {
-	if value < 0 || value > 1<<8-1 {
-		panic("test ISO value exceeds byte")
-	}
-	return byte(value)
+	return testiso.CreateMinimal(t, volumeID, "SYS", "PUB", files)
 }
 
 type maxReadReaderAt struct {
@@ -469,9 +415,9 @@ func TestISO9660_IterFiles(t *testing.T) {
 func TestISO9660_WalkFilesStopsEarlyAndReadFileByPath(t *testing.T) {
 	t.Parallel()
 
-	isoData := createMinimalISOWithFiles("VOL", []isoTestFile{
-		{name: "FIRST.TXT;1", data: []byte("first file")},
-		{name: "SECOND.TXT;1", data: []byte("second file")},
+	isoData := createMinimalISOWithFiles(t, "VOL", []testiso.File{
+		{Name: "FIRST.TXT;1", Data: []byte("first file")},
+		{Name: "SECOND.TXT;1", Data: []byte("second file")},
 	})
 	iso, err := OpenReader(bytes.NewReader(isoData), int64(len(isoData)))
 	if err != nil {
@@ -506,8 +452,8 @@ func TestISO9660_WalkFilesStopsEarlyAndReadFileByPath(t *testing.T) {
 func TestISO9660_WalkFilesReturnsDirectoryReadError(t *testing.T) {
 	t.Parallel()
 
-	isoData := createMinimalISOWithFiles("VOL", []isoTestFile{
-		{name: "BROKEN.TXT;1", data: []byte("data")},
+	isoData := createMinimalISOWithFiles(t, "VOL", []testiso.File{
+		{Name: "BROKEN.TXT;1", Data: []byte("data")},
 	})
 	iso, err := OpenReader(bytes.NewReader(isoData), int64(len(isoData)))
 	if err != nil {

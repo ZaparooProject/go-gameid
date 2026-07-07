@@ -20,7 +20,7 @@ package identifier
 
 import (
 	"errors"
-	"strings"
+	"slices"
 	"testing"
 
 	"github.com/ZaparooProject/go-gameid/iso9660"
@@ -220,7 +220,7 @@ func assertPlayStationRootInfo(t *testing.T, rootFiles []string, serial string, 
 		t.Errorf("serial = %q, want %q", serial, "SLES_12345")
 	}
 	wantRootFiles := []string{"SYSTEM.CNF", "README.TXT"}
-	if strings.Join(rootFiles, " / ") != strings.Join(wantRootFiles, " / ") {
+	if !slices.Equal(rootFiles, wantRootFiles) {
 		t.Errorf("rootFiles = %v, want %v", rootFiles, wantRootFiles)
 	}
 	if walked != 2 {
