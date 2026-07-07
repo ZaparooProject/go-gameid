@@ -20,6 +20,7 @@
 package iso9660
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -55,13 +56,14 @@ type pathTableEntry struct {
 
 // ISO9660 represents a parsed ISO9660 disc image.
 type ISO9660 struct {
-	reader      io.ReaderAt
-	closer      io.Closer // Optional closer for the underlying reader
-	pvd         []byte
-	pathTable   []pathTableEntry
-	blockSize   int
-	blockOffset int64
-	size        int64
+	reader                   io.ReaderAt
+	closer                   io.Closer // Optional closer for the underlying reader
+	pvd                      []byte
+	pathTable                []pathTableEntry
+	blockSize                int
+	blockOffset              int64
+	size                     int64
+	tolerateHeaderReadErrors bool
 }
 
 // Open opens an ISO9660 disc image from a file.
@@ -96,6 +98,7 @@ func Open(path string) (*ISO9660, error) {
 		}
 		iso.size = end
 		iso.blockSize = 2048
+		iso.tolerateHeaderReadErrors = true
 	}
 
 	if err := iso.init(); err != nil {
@@ -154,33 +157,10 @@ func (iso *ISO9660) init() error {
 		iso.blockSize = detectBlockSize(iso.size)
 	}
 
-	// Search for PVD in first ~1MB
-	searchSize := int64(1000000)
-	if searchSize > iso.size {
-		searchSize = iso.size
+	pvdOffset, err := iso.findPVDOffset()
+	if err != nil {
+		return err
 	}
-
-	header := make([]byte, searchSize)
-	if _, err := iso.reader.ReadAt(header, 0); err != nil && err != io.EOF {
-		return fmt.Errorf("failed to read header: %w", err)
-	}
-
-	// Find PVD magic word
-	pvdOffset := int64(-1)
-	for i := 0; i <= len(header)-len(pvdMagicWord); i++ {
-		match := true
-		for j, b := range pvdMagicWord {
-			if header[i+j] != b {
-				match = false
-				break
-			}
-		}
-		if match {
-			pvdOffset = int64(i)
-			break
-		}
-	}
-
 	if pvdOffset == -1 {
 		return ErrPVDNotFound
 	}
@@ -202,6 +182,86 @@ func (iso *ISO9660) init() error {
 	return nil
 }
 
+func (iso *ISO9660) findPVDOffset() (int64, error) {
+	// Real optical block devices can stall or error on pregap sectors before
+	// the ISO9660 volume descriptors. Try the standard PVD sector first, then
+	// fall back to a bounded scan for image formats with offsets.
+	if offset, ok := iso.standardPVDOffset(); ok {
+		return offset, nil
+	}
+
+	// Search for PVD in first ~1MB. Read in logical-block chunks because
+	// optical block devices can reject large ReadAt calls even when the same
+	// sectors are readable individually.
+	searchSize := min(int64(1000000), iso.size)
+	chunkSize := iso.headerScanChunkSize(searchSize)
+	overlap := make([]byte, 0, len(pvdMagicWord)-1)
+
+	for offset := int64(0); offset < searchSize; offset += int64(chunkSize) {
+		chunk, err := iso.readHeaderChunk(offset, min(int64(chunkSize), searchSize-offset))
+		if err != nil {
+			return -1, err
+		}
+		if len(chunk) == 0 {
+			continue
+		}
+
+		searchBuf := make([]byte, 0, len(overlap)+len(chunk))
+		searchBuf = append(searchBuf, overlap...)
+		searchBuf = append(searchBuf, chunk...)
+		if idx := bytes.Index(searchBuf, pvdMagicWord); idx != -1 {
+			return offset - int64(len(overlap)) + int64(idx), nil
+		}
+		overlap = nextSearchOverlap(overlap, searchBuf)
+	}
+
+	return -1, nil
+}
+
+func (iso *ISO9660) standardPVDOffset() (int64, bool) {
+	offset := int64(16 * iso.blockSize)
+	if offset < 0 || offset+int64(len(pvdMagicWord)) > iso.size {
+		return -1, false
+	}
+
+	buf := make([]byte, len(pvdMagicWord))
+	if _, err := iso.reader.ReadAt(buf, offset); err != nil {
+		return -1, false
+	}
+	return offset, bytes.Equal(buf, pvdMagicWord)
+}
+
+func (iso *ISO9660) headerScanChunkSize(searchSize int64) int {
+	chunkSize := iso.blockSize
+	if chunkSize <= 0 {
+		chunkSize = 2048
+	}
+	if int64(chunkSize) > searchSize {
+		return int(searchSize)
+	}
+	return chunkSize
+}
+
+func (iso *ISO9660) readHeaderChunk(offset, readSize int64) ([]byte, error) {
+	buf := make([]byte, readSize)
+	bytesRead, err := iso.reader.ReadAt(buf, offset)
+	if err != nil && err != io.EOF {
+		if iso.tolerateHeaderReadErrors {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read header at offset %d: %w", offset, err)
+	}
+	return buf[:bytesRead], nil
+}
+
+func nextSearchOverlap(dst, searchBuf []byte) []byte {
+	overlapLen := len(pvdMagicWord) - 1
+	if len(searchBuf) < overlapLen {
+		return append(dst[:0], searchBuf...)
+	}
+	return append(dst[:0], searchBuf[len(searchBuf)-overlapLen:]...)
+}
+
 // parsePathTable parses the ISO9660 path table.
 func (iso *ISO9660) parsePathTable() error {
 	// Path table size at offset 132 (little-endian)
@@ -211,6 +271,12 @@ func (iso *ISO9660) parsePathTable() error {
 
 	// Read path table
 	offset := iso.blockOffset + int64(pathTableLBA)*int64(iso.blockSize)
+	if offset < 0 || offset > iso.size {
+		return fmt.Errorf("path table offset %d outside image size %d", offset, iso.size)
+	}
+	if int64(pathTableSize) > iso.size-offset {
+		return fmt.Errorf("path table size %d exceeds remaining image size %d", pathTableSize, iso.size-offset)
+	}
 	pathTableRaw := make([]byte, pathTableSize)
 	if _, err := iso.reader.ReadAt(pathTableRaw, offset); err != nil {
 		return fmt.Errorf("failed to read path table: %w", err)
@@ -238,6 +304,8 @@ func (iso *ISO9660) parsePathTable() error {
 		if dirName == "\x00" {
 			dirName = ""
 			dirParentIdx = -1 // Root
+		} else if dirParentIdx < 0 || dirParentIdx >= len(iso.pathTable) {
+			return fmt.Errorf("invalid path table parent index %d at offset %d", dirParentIdx+1, i)
 		}
 
 		iso.pathTable = append(iso.pathTable, pathTableEntry{
@@ -323,12 +391,49 @@ func (iso *ISO9660) GetUUID() string {
 
 // IterFiles returns a list of files in the filesystem.
 // If onlyRootDir is true, only files in the root directory are returned.
+func (iso *ISO9660) IterFiles(onlyRootDir bool) ([]FileInfo, error) {
+	files := make([]FileInfo, 0)
+	err := iso.WalkFiles(onlyRootDir, func(file FileInfo) bool {
+		files = append(files, file)
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
+func fileInfoFromDirRecord(recBuf []byte, dirPath string) (FileInfo, bool) {
+	flags := recBuf[24]
+	if (flags & 0x02) != 0 {
+		return FileInfo{}, false
+	}
+
+	fileNameLen := int(recBuf[31])
+	if fileNameLen == 0 || 32+fileNameLen > len(recBuf) {
+		return FileInfo{}, false
+	}
+
+	return FileInfo{
+		Path: dirPath + string(recBuf[32:32+fileNameLen]),
+		LBA:  binary.LittleEndian.Uint32(recBuf[1:5]),
+		Size: binary.LittleEndian.Uint32(recBuf[9:13]),
+	}, true
+}
+
+// WalkFiles visits files in the ISO filesystem. Returning false from fn stops iteration early.
+// If onlyRootDir is true, only files in the root directory are visited.
 //
 //nolint:gocognit,revive // Directory traversal requires checking many conditions
-func (iso *ISO9660) IterFiles(onlyRootDir bool) ([]FileInfo, error) {
-	var files []FileInfo
+func (iso *ISO9660) WalkFiles(onlyRootDir bool, fn func(FileInfo) bool) error {
+	var lenBuf [1]byte
+	var recStorage [255]byte
 
 	for idx, entry := range iso.pathTable {
+		if onlyRootDir && idx > 0 {
+			break
+		}
+
 		// Build full directory path
 		dirPath := entry.name
 		tmpIdx := entry.parentIdx
@@ -342,56 +447,33 @@ func (iso *ISO9660) IterFiles(onlyRootDir bool) ([]FileInfo, error) {
 
 		for {
 			// Read record length
-			lenBuf := make([]byte, 1)
-			if _, err := iso.reader.ReadAt(lenBuf, offset); err != nil {
+			if _, err := iso.reader.ReadAt(lenBuf[:], offset); err != nil {
 				break
 			}
 			recLen := int(lenBuf[0])
 			if recLen == 0 {
 				break
 			}
+			if recLen < 34 {
+				return fmt.Errorf("invalid directory record length %d at offset %d", recLen, offset)
+			}
 
 			// Read record
-			recBuf := make([]byte, recLen-1)
+			recBuf := recStorage[:recLen-1]
 			if _, err := iso.reader.ReadAt(recBuf, offset+1); err != nil {
 				break
 			}
 
-			// Check flags (offset 24 in record, which is 25 from start)
-			flags := recBuf[24]
-
-			// Skip directories (bit 1 set)
-			if (flags & 0x02) == 0 {
-				// File entry
-				fileLBA := binary.LittleEndian.Uint32(recBuf[1:5])
-				fileSize := binary.LittleEndian.Uint32(recBuf[9:13])
-				fileNameLen := int(recBuf[31])
-
-				if fileNameLen > 0 && 32+fileNameLen <= len(recBuf) {
-					fileName := string(recBuf[32 : 32+fileNameLen])
-					filePath := dirPath + fileName
-
-					// Only include if in root dir (when requested)
-					if !onlyRootDir || strings.Count(filePath, "/") == 1 {
-						files = append(files, FileInfo{
-							Path: filePath,
-							LBA:  fileLBA,
-							Size: fileSize,
-						})
-					}
-				}
+			file, ok := fileInfoFromDirRecord(recBuf, dirPath)
+			if ok && (!onlyRootDir || strings.Count(file.Path, "/") == 1) && !fn(file) {
+				return nil
 			}
 
 			offset += int64(recLen)
 		}
-
-		// If only root dir and this is not root, skip other directories
-		if onlyRootDir && idx > 0 {
-			break
-		}
 	}
 
-	return files, nil
+	return nil
 }
 
 // DefaultReadFileSizeLimit caps ReadFile allocations. Directory records store
@@ -420,25 +502,29 @@ func (iso *ISO9660) ReadFileWithLimit(info FileInfo, maxSize uint32) ([]byte, er
 
 // ReadFileByPath reads a file by its path.
 func (iso *ISO9660) ReadFileByPath(path string) ([]byte, error) {
-	files, err := iso.IterFiles(false)
-	if err != nil {
-		return nil, err
-	}
-
 	// Normalize path
 	path = strings.ToUpper(path)
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
 
-	for _, file := range files {
+	var found *FileInfo
+	err := iso.WalkFiles(false, func(file FileInfo) bool {
 		// ISO9660 filenames often have version suffix (;1)
 		fpath := strings.ToUpper(file.Path)
 		fpath = strings.Split(fpath, ";")[0]
 
 		if fpath == path || file.Path == path {
-			return iso.ReadFile(file)
+			found = &file
+			return false
 		}
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+	if found != nil {
+		return iso.ReadFile(*found)
 	}
 
 	return nil, ErrFileNotFound

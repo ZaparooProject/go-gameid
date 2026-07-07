@@ -87,6 +87,29 @@ func (m *mockDatabase) setPrefixes(console Console, prefixes []string) {
 	m.idPrefixes[console] = prefixes
 }
 
+func TestSerialFromSystemCNF(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{"boot", "BOOT = cdrom:\\SLUS_005.94;1", "SLUS_00594"},
+		{"boot2", "BOOT2 = cdrom0:\\SLES-123.45;1", "SLES_12345"},
+		{"none", "BOOT = cdrom:\\MAIN.EXE;1", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := serialFromSystemCNF(tt.content); got != tt.want {
+				t.Errorf("serialFromSystemCNF() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // Tests for serialFromVolumeID
 func TestSerialFromVolumeID(t *testing.T) {
 	t.Parallel()

@@ -51,6 +51,14 @@ type playstationISO interface {
 	Close() error
 }
 
+type rootFileWalker interface {
+	WalkFiles(onlyRootDir bool, fn func(iso9660.FileInfo) bool) error
+}
+
+type isoFileReader interface {
+	ReadFile(info iso9660.FileInfo) ([]byte, error)
+}
+
 // openPlayStationISO opens an ISO from a path, handling CUE and CHD files.
 func openPlayStationISO(path string) (playstationISO, error) {
 	ext := strings.ToLower(filepath.Ext(path))
@@ -88,25 +96,10 @@ func identifyPlayStation(
 ) (*Result, error) {
 	result := NewResult(console)
 
-	// Get root files
-	files, err := iso.IterFiles(true)
+	rootFiles, serial, err := playStationRootInfo(iso, console, database)
 	if err != nil {
-		return nil, fmt.Errorf("iterate files: %w", err)
+		return nil, err
 	}
-
-	// Build list of root filenames
-	rootFiles := make([]string, 0, len(files))
-	for _, f := range files {
-		name := strings.TrimPrefix(f.Path, "/")
-		// Remove version suffix (;1)
-		if idx := strings.Index(name, ";"); idx != -1 {
-			name = name[:idx]
-		}
-		rootFiles = append(rootFiles, name)
-	}
-
-	// Try to find serial from root files using ID prefixes
-	serial := findPlayStationSerial(rootFiles, console, database)
 
 	// Fallback to volume ID. Unlike upstream GameID this is accepted without
 	// a database match: the volume ID is read from the disc itself, so an
@@ -139,6 +132,92 @@ func identifyPlayStation(
 	}
 
 	return result, nil
+}
+
+func playStationRootInfo(iso playstationISO, console Console, database Database) (
+	rootFiles []string,
+	serial string,
+	err error,
+) {
+	if walker, ok := iso.(rootFileWalker); ok {
+		return playStationRootInfoWalk(iso, walker, console, database)
+	}
+
+	files, iterErr := iso.IterFiles(true)
+	if iterErr != nil {
+		return nil, "", fmt.Errorf("iterate files: %w", iterErr)
+	}
+	rootFiles = make([]string, 0, len(files))
+	for _, f := range files {
+		name := cleanISOFileName(f.Path)
+		rootFiles = append(rootFiles, name)
+		if serial == "" {
+			serial = serialFromRootFile(name)
+		}
+	}
+	if serial == "" {
+		serial = findPlayStationSerial(rootFiles, console, database)
+	}
+	return rootFiles, serial, nil
+}
+
+func playStationRootInfoWalk(
+	iso playstationISO,
+	walker rootFileWalker,
+	console Console,
+	database Database,
+) (rootFiles []string, serial string, err error) {
+	rootFiles = make([]string, 0)
+	err = walker.WalkFiles(true, func(file iso9660.FileInfo) bool {
+		name := cleanISOFileName(file.Path)
+		rootFiles = append(rootFiles, name)
+		if serial == "" && strings.EqualFold(name, "SYSTEM.CNF") {
+			serial = serialFromSystemCNFFile(iso, file)
+		}
+		if serial == "" {
+			serial = serialFromRootFile(name)
+		}
+		return serial == ""
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("iterate files: %w", err)
+	}
+	if serial == "" {
+		serial = findPlayStationSerial(rootFiles, console, database)
+	}
+	return rootFiles, serial, nil
+}
+
+func cleanISOFileName(path string) string {
+	name := strings.TrimPrefix(path, "/")
+	if idx := strings.Index(name, ";"); idx != -1 {
+		name = name[:idx]
+	}
+	return name
+}
+
+func serialFromSystemCNFFile(iso playstationISO, file iso9660.FileInfo) string {
+	reader, ok := iso.(isoFileReader)
+	if !ok {
+		return ""
+	}
+	data, err := reader.ReadFile(file)
+	if err != nil {
+		return ""
+	}
+	return serialFromSystemCNF(string(data))
+}
+
+func serialFromSystemCNF(content string) string {
+	fields := strings.FieldsFunc(strings.ToUpper(content), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' && r != '-' && r != '.'
+	})
+	for _, field := range fields {
+		if serial := serialFromRootFile(field); serial != "" {
+			return serial
+		}
+	}
+	return ""
 }
 
 // findPlayStationSerial searches for serial in root files.

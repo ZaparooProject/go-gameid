@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,6 +150,40 @@ func createMinimalISO(volumeID, systemID, publisherID string) []byte {
 	data[parentOffset+33] = 0x01
 
 	return data
+}
+
+type maxReadReaderAt struct {
+	data    []byte
+	maxRead int
+}
+
+func (r maxReadReaderAt) ReadAt(buffer []byte, off int64) (int, error) {
+	if len(buffer) > r.maxRead {
+		return 0, errors.New("read too large")
+	}
+	if off >= int64(len(r.data)) {
+		return 0, io.EOF
+	}
+	bytesRead := copy(buffer, r.data[off:])
+	if bytesRead < len(buffer) {
+		return bytesRead, io.EOF
+	}
+	return bytesRead, nil
+}
+
+func TestISO9660_OpenReader_ChunkedHeaderScan(t *testing.T) {
+	t.Parallel()
+
+	data := createMinimalISO("TEST", "PLAYSTATION", "")
+	iso, err := OpenReader(maxReadReaderAt{data: data, maxRead: 2048}, int64(len(data)))
+	if err != nil {
+		t.Fatalf("OpenReader() error = %v", err)
+	}
+	defer func() { _ = iso.Close() }()
+
+	if got := iso.GetVolumeID(); !strings.HasPrefix(got, "TEST") {
+		t.Errorf("GetVolumeID() = %q, want prefix %q", got, "TEST")
+	}
 }
 
 //nolint:gosec // G306 permissions ok for tests
@@ -630,5 +665,95 @@ func TestISO9660_TruncatedPathTable(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "truncated path table entry") {
 		t.Errorf("Open() error = %v, want error containing 'truncated path table entry'", err)
+	}
+}
+
+func TestISO9660_InvalidPathTableParent(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	isoData := createMinimalISO("VOL", "SYS", "PUB")
+
+	const blockSize = 2048
+	pvdOffset := 16 * blockSize
+	pathTableOffset := 18 * blockSize
+	pathTableSize := uint32(22)
+	binary.LittleEndian.PutUint32(isoData[pvdOffset+132:], pathTableSize)
+	binary.BigEndian.PutUint32(isoData[pvdOffset+136:], pathTableSize)
+
+	childOffset := pathTableOffset + 10
+	isoData[childOffset] = 4
+	isoData[childOffset+1] = 0
+	binary.LittleEndian.PutUint32(isoData[childOffset+2:], 19)
+	binary.LittleEndian.PutUint16(isoData[childOffset+6:], 2)
+	copy(isoData[childOffset+8:], "LOOP")
+
+	isoPath := filepath.Join(tmpDir, "invalid-parent.iso")
+	if err := os.WriteFile(isoPath, isoData, 0o600); err != nil {
+		t.Fatalf("Failed to write ISO: %v", err)
+	}
+
+	_, err := Open(isoPath)
+	if err == nil {
+		t.Fatal("Open() should error for invalid path table parent")
+	}
+	if !strings.Contains(err.Error(), "invalid path table parent index") {
+		t.Errorf("Open() error = %v, want error containing 'invalid path table parent index'", err)
+	}
+}
+
+func TestISO9660_PathTableSizeExceedsImage(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	isoData := createMinimalISO("VOL", "SYS", "PUB")
+
+	const blockSize = 2048
+	pvdOffset := 16 * blockSize
+	pathTableSize := uint32(999999)
+	binary.LittleEndian.PutUint32(isoData[pvdOffset+132:], pathTableSize)
+	binary.BigEndian.PutUint32(isoData[pvdOffset+136:], pathTableSize)
+
+	isoPath := filepath.Join(tmpDir, "oversize-path-table.iso")
+	if err := os.WriteFile(isoPath, isoData, 0o600); err != nil {
+		t.Fatalf("Failed to write ISO: %v", err)
+	}
+
+	_, err := Open(isoPath)
+	if err == nil {
+		t.Fatal("Open() should error for oversized path table")
+	}
+	if !strings.Contains(err.Error(), "path table size") {
+		t.Errorf("Open() error = %v, want error containing 'path table size'", err)
+	}
+}
+
+func TestISO9660_IterFilesShortDirectoryRecord(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	isoData := createMinimalISO("VOL", "SYS", "PUB")
+
+	const blockSize = 2048
+	rootOffset := 19 * blockSize
+	isoData[rootOffset] = 17
+
+	isoPath := filepath.Join(tmpDir, "short-record.iso")
+	if err := os.WriteFile(isoPath, isoData, 0o600); err != nil {
+		t.Fatalf("Failed to write ISO: %v", err)
+	}
+
+	iso, err := Open(isoPath)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer func() { _ = iso.Close() }()
+
+	_, err = iso.IterFiles(true)
+	if err == nil {
+		t.Fatal("IterFiles() should error for short directory record")
+	}
+	if !strings.Contains(err.Error(), "invalid directory record length") {
+		t.Errorf("IterFiles() error = %v, want error containing 'invalid directory record length'", err)
 	}
 }
