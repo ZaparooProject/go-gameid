@@ -448,7 +448,7 @@ func (iso *ISO9660) WalkFiles(onlyRootDir bool, fn func(FileInfo) bool) error {
 		for {
 			// Read record length
 			if _, err := iso.reader.ReadAt(lenBuf[:], offset); err != nil {
-				break
+				return fmt.Errorf("read directory record length at offset %d: %w", offset, err)
 			}
 			recLen := int(lenBuf[0])
 			if recLen == 0 {
@@ -461,7 +461,7 @@ func (iso *ISO9660) WalkFiles(onlyRootDir bool, fn func(FileInfo) bool) error {
 			// Read record
 			recBuf := recStorage[:recLen-1]
 			if _, err := iso.reader.ReadAt(recBuf, offset+1); err != nil {
-				break
+				return fmt.Errorf("read directory record at offset %d: %w", offset, err)
 			}
 
 			file, ok := fileInfoFromDirRecord(recBuf, dirPath)

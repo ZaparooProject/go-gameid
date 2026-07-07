@@ -148,9 +148,12 @@ func playStationRootInfo(iso playstationISO, console Console, database Database)
 		return nil, "", fmt.Errorf("iterate files: %w", iterErr)
 	}
 	rootFiles = make([]string, 0, len(files))
-	for _, f := range files {
-		name := cleanISOFileName(f.Path)
+	for _, file := range files {
+		name := cleanISOFileName(file.Path)
 		rootFiles = append(rootFiles, name)
+		if serial == "" && strings.EqualFold(name, "SYSTEM.CNF") {
+			serial = serialFromSystemCNFFile(iso, file)
+		}
 		if serial == "" {
 			serial = serialFromRootFile(name)
 		}
@@ -177,7 +180,7 @@ func playStationRootInfoWalk(
 		if serial == "" {
 			serial = serialFromRootFile(name)
 		}
-		return serial == ""
+		return true
 	})
 	if err != nil {
 		return nil, "", fmt.Errorf("iterate files: %w", err)
@@ -209,8 +212,9 @@ func serialFromSystemCNFFile(iso playstationISO, file iso9660.FileInfo) string {
 }
 
 func serialFromSystemCNF(content string) string {
-	fields := strings.FieldsFunc(strings.ToUpper(content), func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' && r != '-' && r != '.'
+	fields := strings.FieldsFunc(strings.ToUpper(content), func(runeValue rune) bool {
+		return !unicode.IsLetter(runeValue) && !unicode.IsDigit(runeValue) &&
+			runeValue != '_' && runeValue != '-' && runeValue != '.'
 	})
 	for _, field := range fields {
 		if serial := serialFromRootFile(field); serial != "" {

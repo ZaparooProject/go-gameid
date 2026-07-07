@@ -219,14 +219,14 @@ type maxReadReaderAt struct {
 	maxRead int
 }
 
-func (r maxReadReaderAt) ReadAt(buffer []byte, off int64) (int, error) {
-	if len(buffer) > r.maxRead {
+func (reader maxReadReaderAt) ReadAt(buffer []byte, off int64) (int, error) {
+	if len(buffer) > reader.maxRead {
 		return 0, errors.New("read too large")
 	}
-	if off >= int64(len(r.data)) {
+	if off >= int64(len(reader.data)) {
 		return 0, io.EOF
 	}
-	bytesRead := copy(buffer, r.data[off:])
+	bytesRead := copy(buffer, reader.data[off:])
 	if bytesRead < len(buffer) {
 		return bytesRead, io.EOF
 	}
@@ -500,6 +500,30 @@ func TestISO9660_WalkFilesStopsEarlyAndReadFileByPath(t *testing.T) {
 	}
 	if !iso.FileExists("/FIRST.TXT") {
 		t.Error("FileExists() should find file without ISO9660 version suffix")
+	}
+}
+
+func TestISO9660_WalkFilesReturnsDirectoryReadError(t *testing.T) {
+	t.Parallel()
+
+	isoData := createMinimalISOWithFiles("VOL", []isoTestFile{
+		{name: "BROKEN.TXT;1", data: []byte("data")},
+	})
+	iso, err := OpenReader(bytes.NewReader(isoData), int64(len(isoData)))
+	if err != nil {
+		t.Fatalf("OpenReader() error = %v", err)
+	}
+	iso.reader = maxReadReaderAt{data: isoData, maxRead: 1}
+
+	_, err = iso.ReadFileByPath("BROKEN.TXT")
+	if err == nil {
+		t.Fatal("ReadFileByPath() should return directory read error")
+	}
+	if errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("ReadFileByPath() error = %v, want underlying directory read error", err)
+	}
+	if !strings.Contains(err.Error(), "read directory record") {
+		t.Errorf("ReadFileByPath() error = %v, want directory record read error", err)
 	}
 }
 
