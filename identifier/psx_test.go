@@ -40,6 +40,36 @@ func (m *mockPlayStationISO) IterFiles(_ bool) ([]iso9660.FileInfo, error) {
 }
 func (*mockPlayStationISO) Close() error { return nil }
 
+type mockWalkingPlayStationISO struct {
+	readData map[string][]byte
+	walkErr  error
+	readErr  error
+	mockPlayStationISO
+	walked int
+	read   int
+}
+
+func (m *mockWalkingPlayStationISO) WalkFiles(_ bool, fn func(iso9660.FileInfo) bool) error {
+	if m.walkErr != nil {
+		return m.walkErr
+	}
+	for _, file := range m.files {
+		m.walked++
+		if !fn(file) {
+			return nil
+		}
+	}
+	return nil
+}
+
+func (m *mockWalkingPlayStationISO) ReadFile(info iso9660.FileInfo) ([]byte, error) {
+	m.read++
+	if m.readErr != nil {
+		return nil, m.readErr
+	}
+	return m.readData[info.Path], nil
+}
+
 // mockDatabase implements Database for testing.
 type mockDatabase struct {
 	stringEntries map[Console]map[string]map[string]string
@@ -107,6 +137,41 @@ func TestSerialFromSystemCNF(t *testing.T) {
 				t.Errorf("serialFromSystemCNF() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestIdentifyPlayStation_SystemCNFWalker(t *testing.T) {
+	t.Parallel()
+
+	mockISO := &mockWalkingPlayStationISO{
+		mockPlayStationISO: mockPlayStationISO{
+			uuid: "test-uuid",
+			files: []iso9660.FileInfo{
+				{Path: "/SYSTEM.CNF;1"},
+				{Path: "/README.TXT"},
+			},
+		},
+		readData: map[string][]byte{
+			"/SYSTEM.CNF;1": []byte("BOOT2 = cdrom0:\\SLES-123.45;1"),
+		},
+	}
+
+	result, err := identifyPlayStation(mockISO, ConsolePSX, nil, "")
+	if err != nil {
+		t.Fatalf("identifyPlayStation() error = %v", err)
+	}
+
+	if result.ID != "SLES-12345" {
+		t.Errorf("result.ID = %q, want %q", result.ID, "SLES-12345")
+	}
+	if result.Metadata["root_files"] != "SYSTEM.CNF" {
+		t.Errorf("root_files metadata = %q, want %q", result.Metadata["root_files"], "SYSTEM.CNF")
+	}
+	if mockISO.walked != 1 {
+		t.Errorf("WalkFiles visited %d files, want 1", mockISO.walked)
+	}
+	if mockISO.read != 1 {
+		t.Errorf("ReadFile called %d times, want 1", mockISO.read)
 	}
 }
 

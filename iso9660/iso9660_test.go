@@ -152,6 +152,68 @@ func createMinimalISO(volumeID, systemID, publisherID string) []byte {
 	return data
 }
 
+type isoTestFile struct {
+	name string
+	data []byte
+}
+
+func createMinimalISOWithFiles(volumeID string, files []isoTestFile) []byte {
+	const blockSize = 2048
+	base := createMinimalISO(volumeID, "SYS", "PUB")
+	totalBlocks := 20 + len(files)
+	data := make([]byte, totalBlocks*blockSize)
+	copy(data, base)
+
+	pvdOffset := 16 * blockSize
+	binary.LittleEndian.PutUint32(data[pvdOffset+80:], mustUint32(totalBlocks))
+	binary.BigEndian.PutUint32(data[pvdOffset+84:], mustUint32(totalBlocks))
+
+	recordOffset := 19*blockSize + 68
+	for idx, file := range files {
+		fileLBA := 20 + idx
+		writeISOTestFileRecord(data[recordOffset:], fileLBA, len(file.data), file.name)
+		copy(data[fileLBA*blockSize:], file.data)
+		recordOffset += isoTestDirectoryRecordLength(file.name)
+	}
+
+	return data
+}
+
+func writeISOTestFileRecord(record []byte, lba, size int, name string) {
+	recLen := isoTestDirectoryRecordLength(name)
+	record[0] = mustByte(recLen)
+	binary.LittleEndian.PutUint32(record[2:], mustUint32(lba))
+	binary.BigEndian.PutUint32(record[6:], mustUint32(lba))
+	binary.LittleEndian.PutUint32(record[10:], mustUint32(size))
+	binary.BigEndian.PutUint32(record[14:], mustUint32(size))
+	binary.LittleEndian.PutUint16(record[28:], 1)
+	binary.BigEndian.PutUint16(record[30:], 1)
+	record[32] = mustByte(len(name))
+	copy(record[33:], name)
+}
+
+func isoTestDirectoryRecordLength(name string) int {
+	recLen := 33 + len(name)
+	if recLen%2 == 1 {
+		recLen++
+	}
+	return recLen
+}
+
+func mustUint32(value int) uint32 {
+	if value < 0 || value > 1<<32-1 {
+		panic("test ISO value exceeds uint32")
+	}
+	return uint32(value)
+}
+
+func mustByte(value int) byte {
+	if value < 0 || value > 1<<8-1 {
+		panic("test ISO value exceeds byte")
+	}
+	return byte(value)
+}
+
 type maxReadReaderAt struct {
 	data    []byte
 	maxRead int
@@ -183,6 +245,25 @@ func TestISO9660_OpenReader_ChunkedHeaderScan(t *testing.T) {
 
 	if got := iso.GetVolumeID(); !strings.HasPrefix(got, "TEST") {
 		t.Errorf("GetVolumeID() = %q, want prefix %q", got, "TEST")
+	}
+}
+
+func TestISO9660_OpenReader_HeaderScanAcrossChunkBoundary(t *testing.T) {
+	t.Parallel()
+
+	const prefixSize = 2045
+	data := append(bytes.Repeat([]byte{0xff}, prefixSize), createMinimalISO("OFFSET", "PLAYSTATION", "")...)
+	iso, err := OpenReader(maxReadReaderAt{data: data, maxRead: 2048}, int64(len(data)))
+	if err != nil {
+		t.Fatalf("OpenReader() error = %v", err)
+	}
+	defer func() { _ = iso.Close() }()
+
+	if iso.blockOffset != prefixSize {
+		t.Errorf("blockOffset = %d, want %d", iso.blockOffset, prefixSize)
+	}
+	if got := iso.GetVolumeID(); !strings.HasPrefix(got, "OFFSET") {
+		t.Errorf("GetVolumeID() = %q, want prefix %q", got, "OFFSET")
 	}
 }
 
@@ -383,6 +464,43 @@ func TestISO9660_IterFiles(t *testing.T) {
 
 	// Should return empty list for minimal ISO
 	_ = files // We just verify it doesn't error
+}
+
+func TestISO9660_WalkFilesStopsEarlyAndReadFileByPath(t *testing.T) {
+	t.Parallel()
+
+	isoData := createMinimalISOWithFiles("VOL", []isoTestFile{
+		{name: "FIRST.TXT;1", data: []byte("first file")},
+		{name: "SECOND.TXT;1", data: []byte("second file")},
+	})
+	iso, err := OpenReader(bytes.NewReader(isoData), int64(len(isoData)))
+	if err != nil {
+		t.Fatalf("OpenReader() error = %v", err)
+	}
+	defer func() { _ = iso.Close() }()
+
+	visited := make([]string, 0)
+	err = iso.WalkFiles(true, func(file FileInfo) bool {
+		visited = append(visited, file.Path)
+		return false
+	})
+	if err != nil {
+		t.Fatalf("WalkFiles() error = %v", err)
+	}
+	if len(visited) != 1 || visited[0] != "/FIRST.TXT;1" {
+		t.Fatalf("visited = %v, want [/FIRST.TXT;1]", visited)
+	}
+
+	data, err := iso.ReadFileByPath("first.txt")
+	if err != nil {
+		t.Fatalf("ReadFileByPath() error = %v", err)
+	}
+	if string(data) != "first file" {
+		t.Errorf("ReadFileByPath() = %q, want %q", data, "first file")
+	}
+	if !iso.FileExists("/FIRST.TXT") {
+		t.Error("FileExists() should find file without ISO9660 version suffix")
+	}
 }
 
 func TestISO9660_ReadFileByPath_NotFound(t *testing.T) {

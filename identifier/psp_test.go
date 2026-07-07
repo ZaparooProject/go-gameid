@@ -16,11 +16,13 @@
 // You should have received a copy of the GNU General Public License
 // along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
 
-//nolint:dupl // PS2/PSP tests have similar structure but test different identifiers
 package identifier
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -52,5 +54,30 @@ func TestPSPIdentifier_IdentifyFromPath_NonExistent(t *testing.T) {
 	_, err := id.IdentifyFromPath("/nonexistent/path/game.iso", nil)
 	if err == nil {
 		t.Error("IdentifyFromPath() should error for non-existent file")
+	}
+}
+
+func TestPSPIdentifier_IdentifyFromPath_UMDData(t *testing.T) {
+	t.Parallel()
+
+	isoData := createIdentifierTestISO("PSPTEST", []testISOFile{
+		{name: "UMD_DATA.BIN;1", data: []byte("UCUS-98765|Example Game")},
+	})
+	isoPath := filepath.Join(t.TempDir(), "game.iso")
+	if err := os.WriteFile(isoPath, isoData, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	id := NewPSPIdentifier()
+	result, err := id.IdentifyFromPath(isoPath, nil)
+	if err != nil {
+		t.Fatalf("IdentifyFromPath() error = %v", err)
+	}
+
+	if result.ID != "UCUS-98765" {
+		t.Errorf("result.ID = %q, want %q", result.ID, "UCUS-98765")
+	}
+	if !strings.HasPrefix(result.Metadata["volume_ID"], "PSPTEST") {
+		t.Errorf("volume_ID metadata = %q, want prefix %q", result.Metadata["volume_ID"], "PSPTEST")
 	}
 }

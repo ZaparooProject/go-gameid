@@ -16,7 +16,6 @@
 // You should have received a copy of the GNU General Public License
 // along with go-gameid.  If not, see <https://www.gnu.org/licenses/>.
 
-//nolint:dupl // PS2/PSP tests have similar structure but test different identifiers
 package identifier
 
 import (

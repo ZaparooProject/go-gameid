@@ -76,7 +76,8 @@ func identifyPSPFromISO(iso *iso9660.ISO9660, database Database) (*Result, error
 	// Look for UMD_DATA.BIN in root
 	var umdDataInfo *iso9660.FileInfo
 	err := iso.WalkFiles(true, func(file iso9660.FileInfo) bool {
-		if strings.ToUpper(filepath.Base(file.Path)) == "UMD_DATA.BIN" {
+		fileName := strings.ToUpper(filepath.Base(cleanISOFileName(file.Path)))
+		if fileName == "UMD_DATA.BIN" {
 			umdDataInfo = &file
 			return false
 		}
